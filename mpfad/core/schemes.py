@@ -15,13 +15,15 @@ class MpfadScheme(object):
         self.in_vols_pairs = None
 
         # Distances from the internal faces to the volumes who share it.
-        self.hs = None
+        self.h_L = None
+        self.h_R = None
 
         # Normal vectors to internal faces.
         self.Ns = None
 
         # Normal projections of the permeability tensor.
-        self.Kn = None
+        self.Kn_L = None
+        self.Kn_R = None
 
     def assemble(self):
         """Assemble the transmissibility of the MPFA-D scheme. After the call, the
@@ -81,12 +83,10 @@ class MpfadScheme(object):
             n_vols_pairs,
             2, 3))
 
-        h_L = np.linalg.norm(
+        self.h_L = np.linalg.norm(
             internal_volumes_centers[:, 0, :] - internal_faces_centers, axis=1)
-        h_R = np.linalg.norm(
+        self.h_R = np.linalg.norm(
             internal_volumes_centers[:, 1, :] - internal_faces_centers, axis=1)
-
-        self.hs = np.vstack((h_L, h_R)).T
 
     def _set_normal_vectors(self):
         """Set the attribute `Ns` which stores the normal vectors 
@@ -134,12 +134,13 @@ class MpfadScheme(object):
         K_all = self.mesh.permeability[internal_volumes_pairs_flat].reshape(
             (n_vols_pairs * 2, 3, 3))
         N_dup = np.hstack((self.Ns, self.Ns)).reshape((len(self.Ns) * 2, 3))
-        K_n_partial = np.einsum("ij,ikj->ik", N_dup, K_all)
-        K_n_all_part = np.einsum(
-            "ij,ij->i", K_n_partial, N_dup) / (np.linalg.norm(N_dup, axis=1) ** 2)
-        K_n_all = K_n_all_part.reshape((n_vols_pairs, 2))
+        Kn_partial = np.einsum("ij,ikj->ik", N_dup, K_all)
+        Kn_all_part = np.einsum("ij,ij->i", Kn_partial,
+                                N_dup) / (np.linalg.norm(N_dup, axis=1) ** 2)
+        Kn_all = Kn_all_part.reshape((n_vols_pairs, 2))
 
-        self.Kn = K_n_all[:]
+        self.Kn_L = Kn_all[:, 0]
+        self.Kn_R = Kn_all[:, 1]
 
     def _assign_tpfa_terms(self):
         """Set the TPFA terms of the transsmissibility matrix `A`.
@@ -153,10 +154,9 @@ class MpfadScheme(object):
         None
         """
         # Compute the face transmissibilities.
-        Kn_prod = self.Kn[:, 0] * self.Kn[:, 1]
-        Keq = Kn_prod / ((self.Kn[:, 0] * self.hs[:, 1]) +
-                         (self.Kn[:, 1] * self.hs[:, 0]))
-        faces_trans = Keq * np.linalg.norm(self.Ns, axis=1)
+        Kn_prod = self.Kn_L * self.Kn_R
+        Keq = Kn_prod / ((self.Kn_L * self.h_R) +
+                         (self.Kn_R * self.h_L))
 
         # Set transmissibilities in matrix.
         self.A[self.in_vols_pairs[:, 0],
