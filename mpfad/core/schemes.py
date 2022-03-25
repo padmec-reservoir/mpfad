@@ -36,9 +36,9 @@ class MpfadScheme(object):
         None
         """
         self._set_internal_vols_pairs()
-        self._compute_normal_vectors()
-        self._compute_normal_distances()
-        self._compute_normal_permeabilities()
+        self._set_normal_vectors()
+        self._set_normal_distances()
+        self._set_normal_permeabilities()
 
         self._assign_tpfa_terms()
 
@@ -58,7 +58,7 @@ class MpfadScheme(object):
         self.in_vols_pairs = self.mesh.faces.bridge_adjacencies(
             internal_faces, 2, 3)
 
-    def _compute_normal_distances(self):
+    def _set_normal_distances(self):
         """Compute the distances from the center of the internal faces to their
         adjacent volumes.
 
@@ -88,7 +88,7 @@ class MpfadScheme(object):
 
         self.hs = np.vstack((h_L, h_R)).T
 
-    def _compute_normal_vectors(self):
+    def _set_normal_vectors(self):
         """Set the attribute `Ns` which stores the normal vectors 
         to the internal faces.
 
@@ -116,7 +116,7 @@ class MpfadScheme(object):
         self.Ns = np.cross(internal_faces_centers - Is,
                            internal_faces_centers - Js)
 
-    def _compute_normal_permeabilities(self):
+    def _set_normal_permeabilities(self):
         """Compute the normal projections of the permeability tensors.
 
         Parameters
