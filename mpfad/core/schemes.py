@@ -11,6 +11,18 @@ class MpfadScheme(object):
         self.A = lil_matrix((n, n))
         self.q = np.zeros(n)
 
+        # Pairs of volumes sharing an internal face.
+        self.in_vols_pairs = None
+
+        # Distances from the internal faces to the volumes who share it.
+        self.hs = None
+
+        # Normal vectors to internal faces.
+        self.Ns = None
+
+        # Normal projections of the permeability tensor.
+        self.Kn = None
+
     def assemble(self):
         """Assemble the transmissibility of the MPFA-D scheme. After the call, the
         attributes `A` and `q` are set and can be used to solve the problem.
@@ -23,10 +35,16 @@ class MpfadScheme(object):
         -------
         None
         """
-        self.set_tpfa_terms()
+        self._set_internal_vols_pairs()
+        self._compute_normal_vectors()
+        self._compute_normal_distances()
+        self._compute_normal_permeabilities()
 
-    def set_tpfa_terms(self):
-        """Set the TPFA terms of the transsmissibility matrix `A`.
+        self._assign_tpfa_terms()
+
+    def _set_internal_vols_pairs(self):
+        """Set the pairs of volumes sharing an internal face in the 
+        attribute `in_vols_pairs`.
 
         Parameters
         ----------
@@ -36,29 +54,28 @@ class MpfadScheme(object):
         -------
         None
         """
-        # Retrieve the internal faces to compute all pairs of volumes.
         internal_faces = self.mesh.faces.internal[:]
+        self.in_vols_pairs = self.mesh.faces.bridge_adjacencies(
+            internal_faces, 2, 3)
+
+    def _compute_normal_distances(self):
+        """Compute the distances from the center of the internal faces to their
+        adjacent volumes.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        internal_faces = self.mesh.faces.internal[:]
+        internal_volumes_pairs_flat = self.in_vols_pairs.flatten()
+
         n_vols_pairs = len(internal_faces)
 
-        # Compute the internal faces' normal vectors.
-        internal_faces_nodes_1 = self.mesh.faces.connectivities[internal_faces][:, 0]
-        internal_faces_nodes_2 = self.mesh.faces.connectivities[internal_faces][:, 1]
-        V1 = self.mesh.nodes.coords[internal_faces_nodes_1]
-        V2 = self.mesh.nodes.coords[internal_faces_nodes_2]
         internal_faces_centers = self.mesh.faces.center[internal_faces]
-
-        Ns = np.cross(internal_faces_centers - V1, internal_faces_centers - V2)
-
-        # Find the internal volumes, i.e., the volumes containing an internal face.
-        internal_volumes_pairs = self.mesh.faces.bridge_adjacencies(
-            internal_faces,
-            2, 3)
-        internal_volumes_pairs_flat = internal_volumes_pairs.flatten()
-        internal_volumes_pairs_flat_f = internal_volumes_pairs.flatten(
-            order="F")
-
-        # Compute the distance (centroid-centroid distance) between
-        # the internal face and the volumes who share it.
         internal_volumes_centers_flat = self.mesh.volumes.center[internal_volumes_pairs_flat]
         internal_volumes_centers = internal_volumes_centers_flat.reshape((
             n_vols_pairs,
@@ -69,25 +86,83 @@ class MpfadScheme(object):
         h_R = np.linalg.norm(
             internal_volumes_centers[:, 1, :] - internal_faces_centers, axis=1)
 
-        # Compute the orthogonal projections of the permeability tensors.
-        K_all = self.mesh.permeability[internal_volumes_pairs_flat_f].reshape(
-            (n_vols_pairs * 2, 3, 3))
-        N_dup = np.hstack((Ns, Ns)).reshape((len(Ns) * 2, 3))
-        K_eq_partial = np.einsum("ij,ikj->ik", N_dup, K_all)
-        K_eq_all_part = np.einsum(
-            "ij,ij->i", K_eq_partial, N_dup) / (np.linalg.norm(N_dup, axis=1) ** 2)
-        K_eq_all = K_eq_all_part.reshape((2, n_vols_pairs))
+        self.hs = np.vstack((h_L, h_R)).T
 
+    def _compute_normal_vectors(self):
+        """Set the attribute `Ns` which stores the normal vectors 
+        to the internal faces.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        # Retrieve the internal faces.
+        internal_faces = self.mesh.faces.internal[:]
+
+        # Retrieve the points that form the components of the normal vectors.
+        Is_idx = self.mesh.faces.connectivities[internal_faces][:, 0]
+        Js_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
+
+        Is = self.mesh.nodes.coords[Is_idx]
+        Js = self.mesh.nodes.coords[Js_idx]
+
+        internal_faces_centers = self.mesh.faces.center[internal_faces]
+
+        # Set the normal vectors.
+        self.Ns = np.cross(internal_faces_centers - Is,
+                           internal_faces_centers - Js)
+
+    def _compute_normal_permeabilities(self):
+        """Compute the normal projections of the permeability tensors.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        n_vols_pairs = len(self.mesh.faces.internal)
+
+        internal_volumes_pairs_flat = self.in_vols_pairs.flatten(order="F")
+
+        K_all = self.mesh.permeability[internal_volumes_pairs_flat].reshape(
+            (n_vols_pairs * 2, 3, 3))
+        N_dup = np.hstack((self.Ns, self.Ns)).reshape((len(self.Ns) * 2, 3))
+        K_n_partial = np.einsum("ij,ikj->ik", N_dup, K_all)
+        K_n_all_part = np.einsum(
+            "ij,ij->i", K_n_partial, N_dup) / (np.linalg.norm(N_dup, axis=1) ** 2)
+        K_n_all = K_n_all_part.reshape((n_vols_pairs, 2))
+
+        self.Kn = K_n_all[:]
+
+    def _assign_tpfa_terms(self):
+        """Set the TPFA terms of the transsmissibility matrix `A`.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
         # Compute the face transmissibilities.
-        K_eq_prod = K_eq_all[0, :] * K_eq_all[1, :]
-        faces_trans = K_eq_prod / ((K_eq_all[0, :] * h_R) +
-                                   (K_eq_all[1, :] * h_L))
+        Kn_prod = self.Kn[:, 0] * self.Kn[:, 1]
+        Keq = Kn_prod / ((self.Kn[:, 0] * self.hs[:, 1]) +
+                         (self.Kn[:, 1] * self.hs[:, 0]))
+        faces_trans = Keq * np.linalg.norm(self.Ns, axis=1)
 
         # Set transmissibilities in matrix.
-        self.A[internal_volumes_pairs[:, 0],
-               internal_volumes_pairs[:, 1]] = -faces_trans[:]
-        self.A[internal_volumes_pairs[:, 1],
-               internal_volumes_pairs[:, 0]] = -faces_trans[:]
+        self.A[self.in_vols_pairs[:, 0],
+               self.in_vols_pairs[:, 1]] = -faces_trans[:]
+        self.A[self.in_vols_pairs[:, 1],
+               self.in_vols_pairs[:, 0]] = -faces_trans[:]
 
     def set_cdt_terms(self):
         pass
