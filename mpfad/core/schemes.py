@@ -198,5 +198,50 @@ class MpfadScheme(object):
         self.A[self.in_vols_pairs[:, 1],
                self.in_vols_pairs[:, 0]] = -faces_trans[:]
 
-    def set_cdt_terms(self):
-        pass
+    def _compute_cdt_terms(self):
+        """Compute the cross diffusion terms of the MPFA-D scheme.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        A tuple of numpy arrays containing the terms D_JK and D_JI.
+        """
+        n_vols_pairs = len(self.mesh.faces.internal)
+
+        in_vols_pairs_flat = self.in_vols_pairs.flatten()
+        in_vols_centers_flat = self.mesh.volumes.center[in_vols_pairs_flat]
+        in_vols_centers = in_vols_centers_flat.reshape((n_vols_pairs, 2, 3))
+
+        LR = in_vols_centers[:, 1, :] - in_vols_centers[:, 0, :]
+
+        internal_faces = self.mesh.faces.internal[:]
+        in_vols_pairs_flat = self.in_vols_pairs.flatten(order="F")
+
+        I_idx = self.mesh.faces.connectivities[internal_faces][:, 0]
+        J_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
+        K_idx = self.mesh.faces.connectivities[internal_faces][:, 2]
+
+        I = self.mesh.nodes.coords[I_idx]
+        J = self.mesh.nodes.coords[J_idx]
+        K = self.mesh.nodes.coords[K_idx]
+
+        tau_JK = np.cross(self.Ns, J - K)
+        tau_JI = np.cross(self.Ns, J - I)
+
+        Kt_JK_L, Kt_JK_R = self._compute_tangent_permeabilities(tau_JK)
+        Kt_JI_L, Kt_JI_R = self._compute_tangent_permeabilities(tau_JI)
+
+        A1_JK = np.einsum("ij,ij->i", tau_JK, LR) / (self.Ns_norm ** 2)
+        A2_JK = (self.h_L * (Kt_JK_L / self.Kn_L) + self.h_R *
+                 (Kt_JK_R / self.Kn_R)) / self.Ns_norm
+        D_JK = A1_JK - A2_JK
+
+        A1_JI = np.einsum("ij,ij->i", tau_JI, LR) / (self.Ns_norm ** 2)
+        A2_JI = (self.h_L * (Kt_JI_L / self.Kn_L) + self.h_R *
+                 (Kt_JI_R / self.Kn_R)) / self.Ns_norm
+        D_JI = A1_JI - A2_JI
+
+        return D_JK, D_JI
