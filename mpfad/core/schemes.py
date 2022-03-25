@@ -144,6 +144,37 @@ class MpfadScheme(object):
         self.Kn_L = Kn_all[:, 0]
         self.Kn_R = Kn_all[:, 1]
 
+    def _compute_tangent_permeabilities(self, tau_ij):
+        """Computes the tangent projection of the permeability tensors
+        given vectors `tau_ij`.
+
+        Parameters
+        ----------
+        tau_ij: A N x 3 numpy array representing stacked vectors.
+
+        Returns
+        -------
+        A tuple of arrays containing the projections to the left and
+        to the right of the internal faces.
+        """
+        n_vols_pairs = len(self.mesh.faces.internal)
+        internal_volumes_pairs_flat = self.in_vols_pairs.flatten(order="F")
+
+        V = np.hstack((self.Ns, tau_ij)).reshape((len(self.Ns) * 2, 3))
+
+        K_all = self.mesh.permeability[internal_volumes_pairs_flat].reshape(
+            (n_vols_pairs * 2, 3, 3))
+
+        Kt_ij_partial = np.einsum("ij,ikj->ik", V, K_all)
+        Kt_ij_flat = np.einsum("ij,ij->i", Kt_ij_partial,
+                               V) / (np.linalg.norm(V, axis=1) ** 2)
+        Kt_ij_all = Kt_ij_flat.reshape((n_vols_pairs, 2))
+
+        Kt_ij_L = Kt_ij_all[:, 0]
+        Kt_ij_R = Kt_ij_all[:, 1]
+
+        return Kt_ij_L, Kt_ij_R
+
     def _assign_tpfa_terms(self):
         """Set the TPFA terms of the transsmissibility matrix `A`.
 
