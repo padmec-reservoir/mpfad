@@ -20,6 +20,7 @@ class MpfadScheme(object):
 
         # Normal vectors to internal faces.
         self.Ns = None
+        self.Ns_norm = None
 
         # Normal projections of the permeability tensor.
         self.Kn_L = None
@@ -115,6 +116,7 @@ class MpfadScheme(object):
         # Set the normal vectors.
         self.Ns = np.cross(internal_faces_centers - Is,
                            internal_faces_centers - Js)
+        self.Ns_norm = np.linalg.norm(self.Ns, axis=1)
 
     def _set_normal_permeabilities(self):
         """Compute the normal projections of the permeability tensors.
@@ -157,6 +159,7 @@ class MpfadScheme(object):
         Kn_prod = self.Kn_L * self.Kn_R
         Keq = Kn_prod / ((self.Kn_L * self.h_R) +
                          (self.Kn_R * self.h_L))
+        faces_trans = Keq * self.Ns_norm
 
         # Set transmissibilities in matrix.
         self.A[self.in_vols_pairs[:, 0],
