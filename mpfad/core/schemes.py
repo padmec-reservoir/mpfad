@@ -1,9 +1,10 @@
 import numpy as np
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, csr_matrix
+from ..interpolations.base import BaseInterpolation
 
 
 class MpfadScheme(object):
-    def __init__(self, mesh, interpolation):
+    def __init__(self, mesh, interpolation: BaseInterpolation):
         self.mesh = mesh
         self.interpolation = interpolation
 
@@ -43,7 +44,12 @@ class MpfadScheme(object):
         self._set_normal_distances()
         self._set_normal_permeabilities()
 
-        self._assign_tpfa_terms()
+        A_tpfa = self._assemble_tpfa_matrix()
+        A_cdt = self._assemble_cdt_matrix()
+
+        A = A_tpfa + A_cdt
+
+        return A
 
     def _set_internal_vols_pairs(self):
         """Set the pairs of volumes sharing an internal face in the 
@@ -160,14 +166,17 @@ class MpfadScheme(object):
         n_vols_pairs = len(self.mesh.faces.internal)
         internal_volumes_pairs_flat = self.in_vols_pairs.flatten(order="F")
 
-        V = np.hstack((self.Ns, tau_ij)).reshape((len(self.Ns) * 2, 3))
+        tau_ij_dup = np.hstack((tau_ij, tau_ij)).reshape((len(self.Ns) * 2, 3))
+
+        Ns_dup = np.hstack((self.Ns, self.Ns)).reshape((len(self.Ns) * 2, 3))
+        Ns_norm_dup = np.linalg.norm(Ns_dup, axis=1)
 
         K_all = self.mesh.permeability[internal_volumes_pairs_flat].reshape(
             (n_vols_pairs * 2, 3, 3))
 
-        Kt_ij_partial = np.einsum("ij,ikj->ik", V, K_all)
+        Kt_ij_partial = np.einsum("ij,ikj->ik", Ns_dup, K_all)
         Kt_ij_flat = np.einsum("ij,ij->i", Kt_ij_partial,
-                               V) / (np.linalg.norm(V, axis=1) ** 2)
+                               tau_ij_dup) / (Ns_norm_dup ** 2)
         Kt_ij_all = Kt_ij_flat.reshape((n_vols_pairs, 2))
 
         Kt_ij_L = Kt_ij_all[:, 0]
@@ -175,7 +184,7 @@ class MpfadScheme(object):
 
         return Kt_ij_L, Kt_ij_R
 
-    def _assign_tpfa_terms(self):
+    def _assemble_tpfa_matrix(self):
         """Set the TPFA terms of the transsmissibility matrix `A`.
 
         Parameters
@@ -193,10 +202,16 @@ class MpfadScheme(object):
         faces_trans = Keq * self.Ns_norm
 
         # Set transmissibilities in matrix.
-        self.A[self.in_vols_pairs[:, 0],
+        A_tpfa = lil_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
+
+        A_tpfa[self.in_vols_pairs[:, 0],
                self.in_vols_pairs[:, 1]] = -faces_trans[:]
-        self.A[self.in_vols_pairs[:, 1],
+        A_tpfa[self.in_vols_pairs[:, 1],
                self.in_vols_pairs[:, 0]] = -faces_trans[:]
+
+        A_tpfa.setdiag(-A_tpfa.sum(axis=1))
+
+        return A_tpfa.tocsr()
 
     def _compute_cdt_terms(self):
         """Compute the cross diffusion terms of the MPFA-D scheme.
@@ -218,7 +233,6 @@ class MpfadScheme(object):
         LR = in_vols_centers[:, 1, :] - in_vols_centers[:, 0, :]
 
         internal_faces = self.mesh.faces.internal[:]
-        in_vols_pairs_flat = self.in_vols_pairs.flatten(order="F")
 
         I_idx = self.mesh.faces.connectivities[internal_faces][:, 0]
         J_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
@@ -245,3 +259,46 @@ class MpfadScheme(object):
         D_JI = A1_JI - A2_JI
 
         return D_JK, D_JI
+
+    def _assemble_cdt_matrix(self):
+        """Assign the cross diffusion terms to the transmissibility matrix.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        # Compute the cross diffusion coefficients.
+        D_JK, D_JI = self._compute_cdt_terms()
+
+        # Compute the weights for the interpolation of the pressure in a node.
+        W = self.interpolation.interpolate()
+
+        # Find the connectivities of the internal faces.
+        in_faces = self.mesh.faces.internal
+        in_faces_nodes = self.mesh.faces.connectivities[in_faces]
+        I, J, K = in_faces_nodes[:,
+                                 0], in_faces_nodes[:, 1], in_faces_nodes[:, 2]
+
+        # Compute the face transmissibilities.
+        Kn_prod = self.Kn_L * self.Kn_R
+        Keq = Kn_prod / ((self.Kn_L * self.h_R) +
+                         (self.Kn_R * self.h_L))
+        Keq_N = self.Ns_norm * Keq
+
+        # Assemble the CDT matrix.
+        A_cdt = lil_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
+
+        A_cdt[self.in_vols_pairs[:, 0],
+              :] += 0.5 * ((W[J, :] - W[I, :]).multiply(D_JK[:, np.newaxis]) -
+                           (W[J, :] - W[K, :]).multiply(D_JI[:, np.newaxis])).multiply(
+            Keq_N[:, np.newaxis])
+        A_cdt[self.in_vols_pairs[:, 1],
+              :] += 0.5 * ((W[J, :] - W[I, :]).multiply(D_JK[:, np.newaxis]) -
+                           (W[J, :] - W[K, :]).multiply(D_JI[:, np.newaxis])).multiply(
+            Keq_N[:, np.newaxis])
+
+        return A_cdt
