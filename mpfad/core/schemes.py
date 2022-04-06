@@ -290,7 +290,7 @@ class MpfadScheme(object):
         Keq_N = self.Ns_norm * Keq
 
         # Assemble the CDT matrix.
-        A_cdt = lil_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
+        A_cdt = csr_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
 
         cdt_partial = 0.5 * ((W[J, :] - W[I, :]).multiply(D_JK[:, np.newaxis]) - (
             W[J, :] - W[K, :]).multiply(D_JI[:, np.newaxis])).multiply(Keq_N[:, np.newaxis])
