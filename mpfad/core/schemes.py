@@ -292,13 +292,11 @@ class MpfadScheme(object):
         # Assemble the CDT matrix.
         A_cdt = lil_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
 
-        A_cdt[self.in_vols_pairs[:, 0],
-              :] += 0.5 * ((W[J, :] - W[I, :]).multiply(D_JK[:, np.newaxis]) -
-                           (W[J, :] - W[K, :]).multiply(D_JI[:, np.newaxis])).multiply(
-            Keq_N[:, np.newaxis])
-        A_cdt[self.in_vols_pairs[:, 1],
-              :] += 0.5 * ((W[J, :] - W[I, :]).multiply(D_JK[:, np.newaxis]) -
-                           (W[J, :] - W[K, :]).multiply(D_JI[:, np.newaxis])).multiply(
-            Keq_N[:, np.newaxis])
+        cdt_partial = 0.5 * ((W[J, :] - W[I, :]).multiply(D_JK[:, np.newaxis]) - (
+            W[J, :] - W[K, :]).multiply(D_JI[:, np.newaxis])).multiply(Keq_N[:, np.newaxis])
+        cdt = cdt_partial.tocsr()
+
+        A_cdt[self.in_vols_pairs[:, 0], :] += cdt
+        A_cdt[self.in_vols_pairs[:, 1], :] += cdt
 
         return A_cdt
