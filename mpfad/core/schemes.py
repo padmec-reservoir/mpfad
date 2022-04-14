@@ -47,9 +47,14 @@ class MpfadScheme(object):
         A_tpfa = self._assemble_tpfa_matrix()
         A_cdt = self._assemble_cdt_matrix()
 
-        A = A_tpfa + A_cdt
+        A_D, q_D = self._handle_dirichlet_bc()
+        # q_N = self._handle_neumann_bc()
+        q_N = np.zeros(len(self.mesh.volumes))
 
-        return A
+        A = A_tpfa + A_cdt + A_D
+        q = q_D + q_N
+
+        return A, q
 
     def _set_internal_vols_pairs(self):
         """Set the pairs of volumes sharing an internal face in the 
@@ -300,3 +305,66 @@ class MpfadScheme(object):
         A_cdt[self.in_vols_pairs[:, 1], :] += cdt
 
         return A_cdt
+
+    def _handle_dirichlet_bc(self):
+        bfaces = self.mesh.faces.boundary[:]
+        bfaces_dirichlet_values = self.mesh.dirichlet_faces[bfaces].flatten()
+        dirichlet_faces = bfaces[bfaces_dirichlet_values == 1]
+
+        dirichlet_nodes = self.mesh.faces.connectivities[dirichlet_faces]
+        dirichlet_volumes = self.mesh.faces.bridge_adjacencies(
+            dirichlet_faces, 2, 3).flatten()
+
+        R = self.mesh.volumes.center[dirichlet_volumes]
+        dirichlet_faces_centers = self.mesh.faces.center[dirichlet_faces]
+        I_idx, J_idx, K_idx = (
+            dirichlet_nodes[:, 0],
+            dirichlet_nodes[:, 1],
+            dirichlet_nodes[:, 2])
+        I, J, K = (
+            self.mesh.nodes.coords[I_idx],
+            self.mesh.nodes.coords[J_idx],
+            self.mesh.nodes.coords[K_idx])
+
+        N = np.cross(dirichlet_faces_centers - I,
+                     dirichlet_faces_centers - J)
+        N_norm = np.linalg.norm(N, axis=1)
+
+        tau_JK = np.cross(N, J - K)
+        tau_JI = np.cross(N, J - I)
+
+        JR = J - R
+        h_R = np.linalg.norm(R - dirichlet_faces_centers, axis=1)
+
+        K_all = self.mesh.permeability[dirichlet_volumes].reshape((len(dirichlet_volumes), 3, 3))
+
+        Kn_R_partial = np.einsum("ij,ikj->ik", N, K_all)
+        Kn_R = np.einsum("ij,ij->i", Kn_R_partial, N) / (N_norm ** 2)
+
+        Kt_JK = np.einsum("ij,ij->i", Kn_R_partial, tau_JK) / (N_norm ** 2)
+
+        Kt_JI = np.einsum("ij,ij->i", Kn_R_partial, tau_JI) / (N_norm ** 2)
+
+        D_JI = -(np.einsum("ij,ij->i", tau_JK, JR)
+                 * Kn_R) / (N_norm * h_R) + Kt_JK
+        D_JK = -(np.einsum("ij,ij->i", tau_JI, JR)
+                 * Kn_R) / (N_norm * h_R) + Kt_JI
+
+        gD = self.mesh.dirichlet_nodes[dirichlet_nodes.flatten()].reshape(
+            dirichlet_nodes.shape[0], 3)
+        gD_I, gD_J, gD_K = gD[:, 0], gD[:, 1], gD[:, 2]
+
+        diag_A_D = np.zeros(len(self.mesh.volumes))
+        diag_A_D[dirichlet_volumes] = -2 * (Kn_R / h_R)
+
+        A_D = csr_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
+        A_D.setdiag(diag_A_D)
+
+        q_D = np.zeros(len(self.mesh.volumes))
+        q_D[dirichlet_volumes] = -2 * (Kn_R * gD_J / h_R) + D_JI * (
+            gD_J - gD_I) + D_JK * (gD_J - gD_K)
+
+        return A_D, q_D
+
+    def _handle_neumann_bc(self):
+        pass
