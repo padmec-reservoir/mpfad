@@ -335,7 +335,8 @@ class MpfadScheme(object):
         JR = J - R
         h_R = np.linalg.norm(R - dirichlet_faces_centers, axis=1)
 
-        K_all = self.mesh.permeability[dirichlet_volumes].reshape((len(dirichlet_volumes), 3, 3))
+        K_all = self.mesh.permeability[dirichlet_volumes].reshape(
+            (len(dirichlet_volumes), 3, 3))
 
         Kn_R_partial = np.einsum("ij,ikj->ik", N, K_all)
         Kn_R = np.einsum("ij,ij->i", Kn_R_partial, N) / (N_norm ** 2)
@@ -354,14 +355,14 @@ class MpfadScheme(object):
         gD_I, gD_J, gD_K = gD[:, 0], gD[:, 1], gD[:, 2]
 
         diag_A_D = np.zeros(len(self.mesh.volumes))
-        diag_A_D[dirichlet_volumes] = -2 * (Kn_R / h_R)
+        np.add.at(diag_A_D, dirichlet_volumes, -2 * (Kn_R / h_R))
 
         A_D = csr_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
         A_D.setdiag(diag_A_D)
 
         q_D = np.zeros(len(self.mesh.volumes))
-        q_D[dirichlet_volumes] = -2 * (Kn_R * gD_J / h_R) + D_JI * (
-            gD_J - gD_I) + D_JK * (gD_J - gD_K)
+        np.add.at(q_D, dirichlet_volumes, -2 * (Kn_R * gD_J / h_R) + D_JI * (
+            gD_J - gD_I) + D_JK * (gD_J - gD_K))
 
         return A_D, q_D
 
