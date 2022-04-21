@@ -48,8 +48,7 @@ class MpfadScheme(object):
         A_cdt = self._assemble_cdt_matrix()
 
         A_D, q_D = self._handle_dirichlet_bc()
-        # q_N = self._handle_neumann_bc()
-        q_N = np.zeros(len(self.mesh.volumes))
+        q_N = self._handle_neumann_bc()
 
         A = A_tpfa + A_cdt + A_D
         q = q_D + q_N
@@ -367,4 +366,16 @@ class MpfadScheme(object):
         return A_D, q_D
 
     def _handle_neumann_bc(self):
-        pass
+        bfaces = self.mesh.faces.boundary[:]
+        bfaces_neumann_values = self.mesh.neumann[bfaces].flatten()
+        neumann_faces = bfaces[bfaces_neumann_values != 0]
+        neumann_values = bfaces_neumann_values[bfaces_neumann_values != 0]
+
+        q_N = np.zeros(len(self.mesh.volumes))
+
+        if len(neumann_faces) > 0:
+            neumann_volumes = self.mesh.faces.bridge_adjacencies(
+                neumann_faces, 2, 3).flatten()
+            np.add.at(q_N, neumann_volumes, neumann_values)
+
+        return q_N
