@@ -84,20 +84,18 @@ class MpfadScheme(object):
         None
         """
         internal_faces = self.mesh.faces.internal[:]
-        internal_volumes_pairs_flat = self.in_vols_pairs.flatten()
 
-        n_vols_pairs = len(internal_faces)
+        L = self.mesh.volumes.center[self.in_vols_pairs[:, 0]]
+        R = self.mesh.volumes.center[self.in_vols_pairs[:, 1]]
 
-        internal_faces_centers = self.mesh.faces.center[internal_faces]
-        internal_volumes_centers_flat = self.mesh.volumes.center[internal_volumes_pairs_flat]
-        internal_volumes_centers = internal_volumes_centers_flat.reshape((
-            n_vols_pairs,
-            2, 3))
+        J_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
+        J = self.mesh.nodes.coords[J_idx]
 
-        self.h_L = np.linalg.norm(
-            internal_volumes_centers[:, 0, :] - internal_faces_centers, axis=1)
-        self.h_R = np.linalg.norm(
-            internal_volumes_centers[:, 1, :] - internal_faces_centers, axis=1)
+        LJ = J - L
+        LR = J - R
+
+        self.h_L = np.abs(np.einsum("ij,ij->i", self.Ns, LJ) / self.Ns_norm)
+        self.h_R = np.abs(np.einsum("ij,ij->i", self.Ns, LR) / self.Ns_norm)
 
     def _set_normal_vectors(self):
         """Set the attribute `Ns` which stores the normal vectors 
