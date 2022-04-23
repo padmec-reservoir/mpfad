@@ -113,18 +113,31 @@ class MpfadScheme(object):
         internal_faces = self.mesh.faces.internal[:]
 
         # Retrieve the points that form the components of the normal vectors.
-        Is_idx = self.mesh.faces.connectivities[internal_faces][:, 0]
-        Js_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
+        I_idx = self.mesh.faces.connectivities[internal_faces][:, 0]
+        J_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
+        K_idx = self.mesh.faces.connectivities[internal_faces][:, 2]
 
-        Is = self.mesh.nodes.coords[Is_idx]
-        Js = self.mesh.nodes.coords[Js_idx]
+        I = self.mesh.nodes.coords[I_idx]
+        J = self.mesh.nodes.coords[J_idx]
+        K = self.mesh.nodes.coords[K_idx]
 
-        internal_faces_centers = self.mesh.faces.center[internal_faces]
+        n_vols_pairs = len(internal_faces)
+        internal_volumes_centers_flat = self.mesh.volumes.center[self.in_vols_pairs.flatten(
+        )]
+        internal_volumes_centers = internal_volumes_centers_flat.reshape((
+            n_vols_pairs,
+            2, 3))
+
+        LJ = J - internal_volumes_centers[:, 0]
 
         # Set the normal vectors.
-        self.Ns = np.cross(internal_faces_centers - Is,
-                           internal_faces_centers - Js)
+        self.Ns = np.cross(I - J, K - J)
         self.Ns_norm = np.linalg.norm(self.Ns, axis=1)
+
+        N_sign = np.sign(np.einsum("ij,ij->i", LJ, self.Ns))
+        (self.in_vols_pairs[N_sign < 0, 0],
+         self.in_vols_pairs[N_sign < 0, 1]) = (self.in_vols_pairs[N_sign < 0, 1],
+                                               self.in_vols_pairs[N_sign < 0, 0])
 
     def _set_normal_permeabilities(self):
         """Compute the normal projections of the permeability tensors.
