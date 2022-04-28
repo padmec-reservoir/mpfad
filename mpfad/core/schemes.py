@@ -326,8 +326,7 @@ class MpfadScheme(object):
         dirichlet_volumes = self.mesh.faces.bridge_adjacencies(
             dirichlet_faces, 2, 3).flatten()
 
-        R = self.mesh.volumes.center[dirichlet_volumes]
-        dirichlet_faces_centers = self.mesh.faces.center[dirichlet_faces]
+        L = self.mesh.volumes.center[dirichlet_volumes]
         I_idx, J_idx, K_idx = (
             dirichlet_nodes[:, 0],
             dirichlet_nodes[:, 1],
@@ -337,44 +336,50 @@ class MpfadScheme(object):
             self.mesh.nodes.coords[J_idx],
             self.mesh.nodes.coords[K_idx])
 
-        N = np.cross(dirichlet_faces_centers - I,
-                     dirichlet_faces_centers - J)
+        N = np.cross(I - J, K - J)
+
+        LJ = J - L
+        N_test = np.sign(np.einsum("ij,ij->i", LJ, N))
+        I[N_test < 0], K[N_test < 0] = K[N_test < 0], I[N_test < 0]
+        N = np.cross(I - J, K - J)
+
         N_norm = np.linalg.norm(N, axis=1)
 
-        tau_JK = np.cross(N, J - K)
-        tau_JI = np.cross(N, J - I)
+        tau_JK = np.cross(N, K - J)
+        tau_JI = np.cross(N, I - J)
 
-        JR = J - R
-        h_R = np.linalg.norm(R - dirichlet_faces_centers, axis=1)
+        h_L = np.abs(np.einsum("ij,ij->i", N, LJ) / N_norm)
 
         K_all = self.mesh.permeability[dirichlet_volumes].reshape(
             (len(dirichlet_volumes), 3, 3))
 
-        Kn_R_partial = np.einsum("ij,ikj->ik", N, K_all)
-        Kn_R = np.einsum("ij,ij->i", Kn_R_partial, N) / (N_norm ** 2)
+        Kn_L_partial = np.einsum("ij,ikj->ik", N, K_all)
+        Kn_L = np.einsum("ij,ij->i", Kn_L_partial, N) / (N_norm ** 2)
 
-        Kt_JK = np.einsum("ij,ij->i", Kn_R_partial, tau_JK) / (N_norm ** 2)
+        Kt_JK = np.einsum("ij,ij->i", Kn_L_partial, tau_JK) / (N_norm ** 2)
 
-        Kt_JI = np.einsum("ij,ij->i", Kn_R_partial, tau_JI) / (N_norm ** 2)
+        Kt_JI = np.einsum("ij,ij->i", Kn_L_partial, tau_JI) / (N_norm ** 2)
 
-        D_JI = -(np.einsum("ij,ij->i", tau_JK, JR)
-                 * Kn_R) / (N_norm * h_R) + Kt_JK
-        D_JK = -(np.einsum("ij,ij->i", tau_JI, JR)
-                 * Kn_R) / (N_norm * h_R) + Kt_JI
+        D_JI = -(np.einsum("ij,ij->i", tau_JK, LJ)
+                 * Kn_L) / (N_norm * h_L) + Kt_JK
+        D_JK = -(np.einsum("ij,ij->i", tau_JI, LJ)
+                 * Kn_L) / (N_norm * h_L) + Kt_JI
 
         gD = self.mesh.dirichlet_nodes[dirichlet_nodes.flatten()].reshape(
             dirichlet_nodes.shape[0], 3)
         gD_I, gD_J, gD_K = gD[:, 0], gD[:, 1], gD[:, 2]
+        gD_I[N_test < 0], gD_K[N_test < 0] = gD_K[N_test < 0], gD_I[N_test < 0]
 
         diag_A_D = np.zeros(len(self.mesh.volumes))
-        np.add.at(diag_A_D, dirichlet_volumes, -2 * (Kn_R / h_R))
+        np.add.at(diag_A_D, dirichlet_volumes, (Kn_L / h_L))
 
         A_D = csr_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
         A_D.setdiag(diag_A_D)
 
         q_D = np.zeros(len(self.mesh.volumes))
-        np.add.at(q_D, dirichlet_volumes, -2 * (Kn_R * gD_J / h_R) + D_JI * (
-            gD_J - gD_I) + D_JK * (gD_J - gD_K))
+        np.add.at(
+            q_D, dirichlet_volumes, ((Kn_L / h_L) * gD_J)
+            + D_JI * (gD_J - gD_I) + D_JK * (gD_J - gD_K))
 
         return A_D, q_D
 
