@@ -217,16 +217,17 @@ class MpfadScheme(object):
         faces_trans = Keq * self.Ns_norm
 
         # Set transmissibilities in matrix.
-        A_tpfa = lil_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
+        n_vols = len(self.mesh.volumes)
 
-        A_tpfa[self.in_vols_pairs[:, 0],
-               self.in_vols_pairs[:, 1]] = -faces_trans[:]
-        A_tpfa[self.in_vols_pairs[:, 1],
-               self.in_vols_pairs[:, 0]] = -faces_trans[:]
+        data = np.hstack((-faces_trans, -faces_trans))
+        row_idx = np.hstack((self.in_vols_pairs[:, 0], self.in_vols_pairs[:, 1]))
+        col_idx = np.hstack((self.in_vols_pairs[:, 1], self.in_vols_pairs[:, 0]))
+
+        A_tpfa = csr_matrix((data, (row_idx, col_idx)), shape=(n_vols, n_vols))
 
         A_tpfa.setdiag(-A_tpfa.sum(axis=1))
 
-        return A_tpfa.tocsr()
+        return A_tpfa
 
     def _compute_cdt_terms(self):
         """Compute the cross diffusion terms of the MPFA-D scheme.
