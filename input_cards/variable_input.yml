@@ -27,7 +27,21 @@ dirichlet_nodes:
   sparse: True
   level: 0
 
+dirichlet_nodes_flag:
+  type: nodes
+  data size: 1
+  data type: int
+  sparse: True
+  level: 0
+
 neumann:
+  type: faces
+  data size: 1
+  data type: float
+  sparse: True
+  level: 0
+
+neumann_faces:
   type: faces
   data size: 1
   data type: float
