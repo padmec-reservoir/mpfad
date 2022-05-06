@@ -337,6 +337,24 @@ class MpfadScheme(object):
         return A_cdt, q_cdt
 
     def _compute_dirichlet_contribution(self, I, J, K, D_JK, D_JI, Keq_N):
+        """Computes the contribution of dirichlet nodes in an internal
+        face to the cross diffusion terms.
+
+        Parameters
+        ----------
+        I: A numpy array containing the i vertices of the internal faces.
+        J: A numpy array containing the j vertices of the internal faces.
+        K: A numpy array containing the k vertices of the internal faces.
+        D_JK: The cross diffusion term D_JK.
+        D_JI: The cross diffusion term D_JI.
+        Keq_N: The normal projection of the permeability tensor multiplied
+        by the norm of the normal vector.
+
+        Returns
+        -------
+        A numpy array representing the contribution of dirichlet nodes to the
+        RHS of the final system of equations.
+        """
         dirichlet_nodes_flags = self.mesh.dirichlet_nodes_flag[:].flatten()
         dirichlet_nodes = self.mesh.nodes.all[dirichlet_nodes_flags == 1]
 
@@ -377,6 +395,20 @@ class MpfadScheme(object):
         return q_D_cdt
 
     def _handle_dirichlet_bc(self):
+        """Computes the contribution of the dirichlet boundary
+        conditions through the boundary faces.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        A tuple `(A_D, q_D)` where `A_D` is a Scipy csr_matrix with the
+        contribution of the Dirichlet boundary conditions to the system's
+        matrix and `q_D` is a numpy array containing the contribution to
+        the RHS of the system.
+        """
         bfaces = self.mesh.faces.boundary[:]
         bfaces_dirichlet_values = self.mesh.dirichlet_faces[bfaces].flatten()
         dirichlet_faces = bfaces[bfaces_dirichlet_values == 1]
@@ -443,6 +475,17 @@ class MpfadScheme(object):
         return A_D, q_D
 
     def _handle_neumann_bc(self):
+        """Computes the contribution of the Neumann boundary
+        conditions through the boundary faces.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        A numpy array containing the contribution to the RHS of the system.
+        """
         bfaces = self.mesh.faces.boundary[:]
         bfaces_neumann_values = self.mesh.neumann[bfaces].flatten()
         neumann_faces = bfaces[bfaces_neumann_values != 0]
