@@ -45,13 +45,13 @@ class MpfadScheme(object):
         self._set_normal_permeabilities()
 
         A_tpfa = self._assemble_tpfa_matrix()
-        A_cdt = self._assemble_cdt_matrix()
+        A_cdt, q_cdt = self._assemble_cdt_matrix()
 
         A_D, q_D = self._handle_dirichlet_bc()
         q_N = self._handle_neumann_bc()
 
         A = A_tpfa + A_cdt + A_D
-        q = q_D + q_N
+        q = q_D + q_N + q_cdt
 
         return A, q
 
@@ -220,8 +220,12 @@ class MpfadScheme(object):
         n_vols = len(self.mesh.volumes)
 
         data = np.hstack((-faces_trans, -faces_trans))
-        row_idx = np.hstack((self.in_vols_pairs[:, 0], self.in_vols_pairs[:, 1]))
-        col_idx = np.hstack((self.in_vols_pairs[:, 1], self.in_vols_pairs[:, 0]))
+        row_idx = np.hstack(
+            (self.in_vols_pairs[:, 0],
+             self.in_vols_pairs[:, 1]))
+        col_idx = np.hstack(
+            (self.in_vols_pairs[:, 1],
+             self.in_vols_pairs[:, 0]))
 
         A_tpfa = csr_matrix((data, (row_idx, col_idx)), shape=(n_vols, n_vols))
 
@@ -296,8 +300,10 @@ class MpfadScheme(object):
         # Find the connectivities of the internal faces.
         in_faces = self.mesh.faces.internal
         in_faces_nodes = self.mesh.faces.connectivities[in_faces]
-        I, J, K = in_faces_nodes[:,
-                                 0], in_faces_nodes[:, 1], in_faces_nodes[:, 2]
+        I, J, K = (
+            in_faces_nodes[:, 0],
+            in_faces_nodes[:, 1],
+            in_faces_nodes[:, 2])
 
         # Compute the face transmissibilities.
         Kn_prod = self.Kn_L * self.Kn_R
@@ -306,16 +312,69 @@ class MpfadScheme(object):
         Keq_N = self.Ns_norm * Keq
 
         # Assemble the CDT matrix.
-        A_cdt = csr_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
+        cdt_I = 0.5 * W[I, :].multiply((D_JK * Keq_N)[:, np.newaxis]).tocsr()
+        cdt_J = 0.5 * W[J, :].multiply(((D_JI - D_JK) * Keq_N)
+                                       [:, np.newaxis]).tocsr()
+        cdt_K = 0.5 * W[K, :].multiply((-D_JI * Keq_N)[:, np.newaxis]).tocsr()
+        cdt = cdt_I + cdt_J + cdt_K
 
-        cdt_partial = 0.5 * ((W[J, :] - W[I, :]).multiply(D_JK[:, np.newaxis]) - (
-            W[J, :] - W[K, :]).multiply(D_JI[:, np.newaxis])).multiply(Keq_N[:, np.newaxis])
-        cdt = cdt_partial.tocsr()
+        n_vols = len(self.mesh.volumes)
+        n_in_faces = len(in_faces)
 
-        A_cdt[self.in_vols_pairs[:, 0], :] += cdt
-        A_cdt[self.in_vols_pairs[:, 1], :] += cdt
+        d = - np.ones(n_in_faces * 2)
+        d[n_in_faces:] *= -1
+        in_faces_idx = np.hstack((np.arange(n_in_faces), np.arange(n_in_faces)))
+        in_vols_flat = self.in_vols_pairs.flatten(order="F")
 
-        return A_cdt
+        M = csr_matrix(
+            (d, (in_vols_flat, in_faces_idx)),
+            shape=(n_vols, n_in_faces))
+
+        q_cdt = self._compute_dirichlet_contribution(I, J, K, D_JK, D_JI, Keq_N)
+
+        A_cdt = M @ cdt
+
+        return A_cdt, q_cdt
+
+    def _compute_dirichlet_contribution(self, I, J, K, D_JK, D_JI, Keq_N):
+        dirichlet_nodes_flags = self.mesh.dirichlet_nodes_flag[:].flatten()
+        dirichlet_nodes = self.mesh.nodes.all[dirichlet_nodes_flags == 1]
+
+        gD = self.mesh.dirichlet_nodes[:].flatten()
+
+        I_D_mask = np.isin(I, dirichlet_nodes)
+        J_D_mask = np.isin(J, dirichlet_nodes)
+        K_D_mask = np.isin(K, dirichlet_nodes)
+
+        I_D, J_D, K_D = I[I_D_mask], J[J_D_mask], K[K_D_mask]
+
+        I_D_left_vol, I_D_right_vol = (
+            self.in_vols_pairs[I_D_mask, 0],
+            self.in_vols_pairs[I_D_mask, 1])
+        J_D_left_vol, J_D_right_vol = (
+            self.in_vols_pairs[J_D_mask, 0],
+            self.in_vols_pairs[J_D_mask, 1])
+        K_D_left_vol, K_D_right_vol = (
+            self.in_vols_pairs[K_D_mask, 0],
+            self.in_vols_pairs[K_D_mask, 1])
+
+        I_D_term = 0.5 * Keq_N[I_D_mask] * D_JK[I_D_mask] * gD[I_D]
+        J_D_term = 0.5 * Keq_N[J_D_mask] * (
+            D_JI[J_D_mask] - D_JK[J_D_mask]) * gD[J_D]
+        K_D_term = -0.5 * Keq_N[K_D_mask] * D_JI[K_D_mask] * gD[K_D]
+
+        q_D_cdt = np.zeros(len(self.mesh.volumes))
+
+        np.add.at(q_D_cdt, I_D_left_vol, I_D_term)
+        np.add.at(q_D_cdt, I_D_right_vol, -I_D_term)
+
+        np.add.at(q_D_cdt, J_D_left_vol, J_D_term)
+        np.add.at(q_D_cdt, J_D_right_vol, -J_D_term)
+
+        np.add.at(q_D_cdt, K_D_left_vol, K_D_term)
+        np.add.at(q_D_cdt, K_D_right_vol, -K_D_term)
+
+        return q_D_cdt
 
     def _handle_dirichlet_bc(self):
         bfaces = self.mesh.faces.boundary[:]
