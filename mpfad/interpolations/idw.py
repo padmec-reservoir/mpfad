@@ -1,11 +1,13 @@
 import numpy as np
 from .base import BaseInterpolation
-from scipy.sparse import lil_matrix
+from scipy.sparse import csr_matrix
 
 
 class IdwInterpolation(BaseInterpolation):
     def interpolate(self):
         all_nodes = self.mesh.nodes.all[:]
+        dirichlet_nodes_flag = self.mesh.dirichlet_nodes_flag[:].flatten()
+        dirichlet_nodes = all_nodes[dirichlet_nodes_flag == 1]
 
         vols_around = self.mesh.nodes.bridge_adjacencies(all_nodes, 1, 3)
         vols_around_flat = np.concatenate(vols_around)
@@ -21,9 +23,13 @@ class IdwInterpolation(BaseInterpolation):
         for node in all_nodes:
             prev = np.sum(ns[: node])
             curr = np.sum(ns[: (node + 1)])
-            D_inv[prev:curr] /= np.sum(D_inv[prev:curr])
 
-        W = lil_matrix((len(all_nodes), len(self.mesh.volumes)))
-        W[nodes_idx, vols_around_flat] = D_inv[:]
+            if node in dirichlet_nodes:
+                D_inv[prev:curr] = 0
+            else:
+                D_inv[prev:curr] /= np.sum(D_inv[prev:curr])
 
-        return W.tocsr()
+        W = csr_matrix((D_inv, (nodes_idx, vols_around_flat)),
+                       shape=(len(all_nodes), len(self.mesh.volumes)))
+
+        return W
