@@ -131,7 +131,7 @@ class MpfadScheme(object):
         LJ = J - internal_volumes_centers[:, 0]
 
         # Set the normal vectors.
-        self.Ns = np.cross(I - J, K - J)
+        self.Ns = 0.5 * np.cross(I - J, K - J)
         self.Ns_norm = np.linalg.norm(self.Ns, axis=1)
 
         N_sign = np.sign(np.einsum("ij,ij->i", LJ, self.Ns))
@@ -429,12 +429,12 @@ class MpfadScheme(object):
             self.mesh.nodes.coords[J_idx],
             self.mesh.nodes.coords[K_idx])
 
-        N = np.cross(I - J, K - J)
+        N = 0.5 * np.cross(I - J, K - J)
 
         LJ = J - L
         N_test = np.sign(np.einsum("ij,ij->i", LJ, N))
         I[N_test < 0], K[N_test < 0] = K[N_test < 0], I[N_test < 0]
-        N = np.cross(I - J, K - J)
+        N = 0.5 * np.cross(I - J, K - J)
 
         N_norm = np.linalg.norm(N, axis=1)
 
