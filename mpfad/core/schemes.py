@@ -392,6 +392,8 @@ class MpfadScheme(object):
         np.add.at(q_D_cdt, K_D_left_vol, K_D_term)
         np.add.at(q_D_cdt, K_D_right_vol, -K_D_term)
 
+        q_D_cdt *= -1
+
         return q_D_cdt
 
     def _handle_dirichlet_bc(self):
