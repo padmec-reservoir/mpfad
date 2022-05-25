@@ -454,9 +454,9 @@ class MpfadScheme(object):
         Kt_JI = np.einsum("ij,ij->i", Kn_L_partial, tau_JI) / (N_norm ** 2)
 
         D_JI = -(np.einsum("ij,ij->i", tau_JK, LJ)
-                 * Kn_L) / (N_norm * h_L) + Kt_JK
+                 * Kn_L) / (2 * N_norm * h_L) + Kt_JK / 2
         D_JK = -(np.einsum("ij,ij->i", tau_JI, LJ)
-                 * Kn_L) / (N_norm * h_L) + Kt_JI
+                 * Kn_L) / (2 * N_norm * h_L) + Kt_JI / 2
 
         gD = self.mesh.dirichlet_nodes[dirichlet_nodes.flatten()].reshape(
             dirichlet_nodes.shape[0], 3)
@@ -464,14 +464,14 @@ class MpfadScheme(object):
         gD_I[N_test < 0], gD_K[N_test < 0] = gD_K[N_test < 0], gD_I[N_test < 0]
 
         diag_A_D = np.zeros(len(self.mesh.volumes))
-        np.add.at(diag_A_D, dirichlet_volumes, (Kn_L / h_L))
+        np.add.at(diag_A_D, dirichlet_volumes, ((Kn_L * N_norm) / h_L))
 
         A_D = csr_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
         A_D.setdiag(diag_A_D)
 
         q_D = np.zeros(len(self.mesh.volumes))
         np.add.at(
-            q_D, dirichlet_volumes, ((Kn_L / h_L) * gD_J)
+            q_D, dirichlet_volumes, ((Kn_L * N_norm / h_L) * gD_J)
             + D_JI * (gD_J - gD_I) + D_JK * (gD_J - gD_K))
 
         return A_D, q_D
