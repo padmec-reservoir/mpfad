@@ -48,6 +48,20 @@ neumann_faces:
   sparse: True
   level: 0
 
+neumann_nodes:
+  type: nodes
+  data size: 1
+  data type: float
+  sparse: True
+  level: 0
+
+neumann_nodes_flag:
+  type: nodes
+  data size: 1
+  data type: int
+  sparse: True
+  level: 0
+
 pressure:
   type: volumes
   data size: 1
