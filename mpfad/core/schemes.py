@@ -88,7 +88,9 @@ class MpfadScheme(object):
         L = self.mesh.volumes.center[self.in_vols_pairs[:, 0]]
         R = self.mesh.volumes.center[self.in_vols_pairs[:, 1]]
 
-        J_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
+        in_faces_nodes = self.mesh.faces.bridge_adjacencies(
+            internal_faces, 0, 0)
+        J_idx = in_faces_nodes[:, 1]
         J = self.mesh.nodes.coords[J_idx]
 
         LJ = J - L
@@ -113,9 +115,12 @@ class MpfadScheme(object):
         internal_faces = self.mesh.faces.internal[:]
 
         # Retrieve the points that form the components of the normal vectors.
-        I_idx = self.mesh.faces.connectivities[internal_faces][:, 0]
-        J_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
-        K_idx = self.mesh.faces.connectivities[internal_faces][:, 2]
+        internal_faces_nodes = self.mesh.faces.bridge_adjacencies(
+            internal_faces,
+            0, 0)
+        I_idx = internal_faces_nodes[:, 0]
+        J_idx = internal_faces_nodes[:, 1]
+        K_idx = internal_faces_nodes[:, 2]
 
         I = self.mesh.nodes.coords[I_idx]
         J = self.mesh.nodes.coords[J_idx]
@@ -254,9 +259,12 @@ class MpfadScheme(object):
 
         internal_faces = self.mesh.faces.internal[:]
 
-        I_idx = self.mesh.faces.connectivities[internal_faces][:, 0]
-        J_idx = self.mesh.faces.connectivities[internal_faces][:, 1]
-        K_idx = self.mesh.faces.connectivities[internal_faces][:, 2]
+        internal_faces_nodes = self.mesh.faces.bridge_adjacencies(
+            internal_faces,
+            0, 0)
+        I_idx = internal_faces_nodes[:, 0]
+        J_idx = internal_faces_nodes[:, 1]
+        K_idx = internal_faces_nodes[:, 2]
 
         I = self.mesh.nodes.coords[I_idx]
         J = self.mesh.nodes.coords[J_idx]
@@ -299,7 +307,7 @@ class MpfadScheme(object):
 
         # Find the connectivities of the internal faces.
         in_faces = self.mesh.faces.internal
-        in_faces_nodes = self.mesh.faces.connectivities[in_faces]
+        in_faces_nodes = self.mesh.faces.bridge_adjacencies(in_faces, 0, 0)
         I, J, K = (
             in_faces_nodes[:, 0],
             in_faces_nodes[:, 1],
@@ -415,7 +423,8 @@ class MpfadScheme(object):
         bfaces_dirichlet_values = self.mesh.dirichlet_faces[bfaces].flatten()
         dirichlet_faces = bfaces[bfaces_dirichlet_values == 1]
 
-        dirichlet_nodes = self.mesh.faces.connectivities[dirichlet_faces]
+        dirichlet_nodes = self.mesh.faces.bridge_adjacencies(
+            dirichlet_faces, 0, 0)
         dirichlet_volumes = self.mesh.faces.bridge_adjacencies(
             dirichlet_faces, 2, 3).flatten()
 
