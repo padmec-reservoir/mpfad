@@ -51,7 +51,7 @@ class MpfadScheme(object):
         q_N = self._handle_neumann_bc()
 
         A = A_tpfa + A_cdt + A_D
-        q = q_D + q_N + q_cdt
+        q = q_D + q_N - q_cdt
 
         return A, q
 
