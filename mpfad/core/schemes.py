@@ -270,8 +270,8 @@ class MpfadScheme(object):
         J = self.mesh.nodes.coords[J_idx]
         K = self.mesh.nodes.coords[K_idx]
 
-        tau_JK = np.cross(self.Ns, J - K)
-        tau_JI = np.cross(self.Ns, J - I)
+        tau_JK = np.cross(self.Ns, K - J)
+        tau_JI = np.cross(self.Ns, I - J)
 
         Kt_JK_L, Kt_JK_R = self._compute_tangent_permeabilities(tau_JK)
         Kt_JI_L, Kt_JI_R = self._compute_tangent_permeabilities(tau_JI)
