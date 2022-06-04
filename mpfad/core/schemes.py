@@ -481,7 +481,7 @@ class MpfadScheme(object):
         q_D = np.zeros(len(self.mesh.volumes))
         np.add.at(
             q_D, dirichlet_volumes, ((Kn_L * N_norm / h_L) * gD_J)
-            + D_JI * (gD_J - gD_I) + D_JK * (gD_J - gD_K))
+            + D_JI * (gD_J - gD_I) + D_JK * (gD_K - gD_J))
 
         return A_D, q_D
 
