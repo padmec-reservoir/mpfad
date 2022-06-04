@@ -157,18 +157,20 @@ class MpfadScheme(object):
         """
         n_vols_pairs = len(self.mesh.faces.internal)
 
-        internal_volumes_pairs_flat = self.in_vols_pairs.flatten(order="F")
+        lvols = self.in_vols_pairs[:, 0]
+        rvols = self.in_vols_pairs[:, 1]
 
-        K_all = self.mesh.permeability[internal_volumes_pairs_flat].reshape(
-            (n_vols_pairs * 2, 3, 3))
-        N_dup = np.hstack((self.Ns, self.Ns)).reshape((len(self.Ns) * 2, 3))
-        Kn_partial = np.einsum("ij,ikj->ik", N_dup, K_all)
-        Kn_all_part = np.einsum("ij,ij->i", Kn_partial,
-                                N_dup) / (np.linalg.norm(N_dup, axis=1) ** 2)
-        Kn_all = Kn_all_part.reshape((n_vols_pairs, 2))
+        KL = self.mesh.permeability[lvols].reshape((n_vols_pairs, 3, 3))
+        KR = self.mesh.permeability[rvols].reshape((n_vols_pairs, 3, 3))
 
-        self.Kn_L = Kn_all[:, 0]
-        self.Kn_R = Kn_all[:, 1]
+        KnL_pre = np.einsum("ij,ikj->ik", self.Ns, KL)
+        KnR_pre = np.einsum("ij,ikj->ik", self.Ns, KR)
+
+        KnL = np.einsum("ij,ij->i", KnL_pre, self.Ns) / self.Ns_norm ** 2
+        KnR = np.einsum("ij,ij->i", KnR_pre, self.Ns) / self.Ns_norm ** 2
+
+        self.Kn_L = KnL[:]
+        self.Kn_R = KnR[:]
 
     def _compute_tangent_permeabilities(self, tau_ij):
         """Computes the tangent projection of the permeability tensors
@@ -184,23 +186,20 @@ class MpfadScheme(object):
         to the right of the internal faces.
         """
         n_vols_pairs = len(self.mesh.faces.internal)
-        internal_volumes_pairs_flat = self.in_vols_pairs.flatten(order="F")
 
-        tau_ij_dup = np.hstack((tau_ij, tau_ij)).reshape((len(self.Ns) * 2, 3))
+        n_vols_pairs = len(self.mesh.faces.internal)
 
-        Ns_dup = np.hstack((self.Ns, self.Ns)).reshape((len(self.Ns) * 2, 3))
-        Ns_norm_dup = np.linalg.norm(Ns_dup, axis=1)
+        lvols = self.in_vols_pairs[:, 0]
+        rvols = self.in_vols_pairs[:, 1]
 
-        K_all = self.mesh.permeability[internal_volumes_pairs_flat].reshape(
-            (n_vols_pairs * 2, 3, 3))
+        KL = self.mesh.permeability[lvols].reshape((n_vols_pairs, 3, 3))
+        KR = self.mesh.permeability[rvols].reshape((n_vols_pairs, 3, 3))
 
-        Kt_ij_partial = np.einsum("ij,ikj->ik", Ns_dup, K_all)
-        Kt_ij_flat = np.einsum("ij,ij->i", Kt_ij_partial,
-                               tau_ij_dup) / (Ns_norm_dup ** 2)
-        Kt_ij_all = Kt_ij_flat.reshape((n_vols_pairs, 2))
+        Kt_ij_L_pre = np.einsum("ij,ikj->ik", self.Ns, KL)
+        Kt_ij_R_pre = np.einsum("ij,ikj->ik", self.Ns, KR)
 
-        Kt_ij_L = Kt_ij_all[:, 0]
-        Kt_ij_R = Kt_ij_all[:, 1]
+        Kt_ij_L = np.einsum("ij,ij->i", Kt_ij_L_pre, tau_ij) / self.Ns_norm ** 2
+        Kt_ij_R = np.einsum("ij,ij->i", Kt_ij_R_pre, tau_ij) / self.Ns_norm ** 2
 
         return Kt_ij_L, Kt_ij_R
 
