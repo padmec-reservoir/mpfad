@@ -39,10 +39,13 @@ class GlsInterpolation(BaseInterpolation):
             W_in = csr_matrix((len(all_nodes), len(self.mesh.volumes)))
 
         if len(neumann_nodes) > 0:
-            ws, vols_idx, neu_ws = self._interpolate_neumann_nodes(
+            ws, vols_idx, neumann_nodes_ws = self._interpolate_neumann_nodes(
                 neumann_nodes)
             vols_idx_flat = np.concatenate(vols_idx)
             ws_flat = np.concatenate(ws)
+
+            neu_ws = np.zeros(len(all_nodes))
+            neu_ws[neumann_nodes] = neumann_nodes_ws[:]
 
             ns = np.array([len(vols) for vols in vols_idx])
             nodes_idx = np.repeat(neumann_nodes, ns)
@@ -51,7 +54,7 @@ class GlsInterpolation(BaseInterpolation):
                 len(all_nodes), len(self.mesh.volumes)))
         else:
             W_neu = csr_matrix((len(all_nodes), len(self.mesh.volumes)))
-            neu_ws = None
+            neu_ws = np.zeros(len(all_nodes))
 
         W = W_in + W_neu
 
