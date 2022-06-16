@@ -304,8 +304,8 @@ class GlsInterpolation(BaseInterpolation):
 
         # Set the normal vectors.
         Ns = np.cross(I - J, K - J)
-        self.Ns_norm = np.linalg.norm(Ns, axis=1)
-        self.Ns = Ns / self.Ns_norm[:, np.newaxis]
+        Ns_norm = np.linalg.norm(Ns, axis=1)
+        self.Ns = Ns / Ns_norm[:, np.newaxis]
 
     def _compute_diffusion_magnitude(self):
         nvols = len(self.mesh.volumes)
