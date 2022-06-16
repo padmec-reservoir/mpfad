@@ -485,8 +485,9 @@ class MpfadScheme(object):
         diag_A_D = np.zeros(len(self.mesh.volumes))
         np.add.at(diag_A_D, dirichlet_volumes, ((Kn_L * N_norm) / h_L))
 
-        A_D = csr_matrix((len(self.mesh.volumes), len(self.mesh.volumes)))
-        A_D.setdiag(diag_A_D)
+        nvols = len(self.mesh.volumes)
+        diag_idx = np.arange(nvols)
+        A_D = csr_matrix((diag_A_D, (diag_idx, diag_idx)), shape=(nvols, nvols))
 
         q_D = np.zeros(len(self.mesh.volumes))
         np.add.at(
