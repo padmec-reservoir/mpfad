@@ -302,7 +302,7 @@ class MpfadScheme(object):
         D_JK, D_JI = self._compute_cdt_terms()
 
         # Compute the weights for the interpolation of the pressure in a node.
-        W = self.interpolation.interpolate()
+        W, neu_ws = self.interpolation.interpolate()
 
         # Find the connectivities of the internal faces.
         in_faces = self.mesh.faces.internal
@@ -337,18 +337,34 @@ class MpfadScheme(object):
             (d, (in_vols_flat, in_faces_idx)),
             shape=(n_vols, n_in_faces))
 
-        q_cdt = self._compute_dirichlet_contribution(I, J, K, D_JK, D_JI, Keq_N)
+        dirichlet_nodes_flags = self.mesh.dirichlet_nodes_flag[:].flatten()
+        dirichlet_nodes = self.mesh.nodes.all[dirichlet_nodes_flags == 1]
+        gD = self.mesh.dirichlet_nodes[:].flatten()
+
+        neumann_nodes_flag = self.mesh.neumann_nodes_flag[:].flatten()
+        neumann_nodes = self.mesh.nodes.all[neumann_nodes_flag == 1]
+
+        qD_cdt = self._compute_boundary_contribution(
+            dirichlet_nodes, gD, I, J, K, D_JK, D_JI, Keq_N)
+        qN_cdt = self._compute_boundary_contribution(
+            neumann_nodes, neu_ws, I, J, K, D_JK, D_JI, Keq_N)
 
         A_cdt = M @ cdt
 
+        q_cdt = qD_cdt + qN_cdt
+
         return A_cdt, q_cdt
 
-    def _compute_dirichlet_contribution(self, I, J, K, D_JK, D_JI, Keq_N):
-        """Computes the contribution of dirichlet nodes in an internal
+    def _compute_boundary_contribution(
+            self, bnodes, bvalues, I, J, K, D_JK, D_JI, Keq_N):
+        """Computes the contribution of boundary nodes in an internal
         face to the cross diffusion terms.
 
         Parameters
         ----------
+        bnodes: A numpy array containing the boundary nodes.
+        bvalues: A numpy array containing the boundary values for
+            the all nodes.
         I: A numpy array containing the i vertices of the internal faces.
         J: A numpy array containing the j vertices of the internal faces.
         K: A numpy array containing the k vertices of the internal faces.
@@ -362,14 +378,9 @@ class MpfadScheme(object):
         A numpy array representing the contribution of dirichlet nodes to the
         RHS of the final system of equations.
         """
-        dirichlet_nodes_flags = self.mesh.dirichlet_nodes_flag[:].flatten()
-        dirichlet_nodes = self.mesh.nodes.all[dirichlet_nodes_flags == 1]
-
-        gD = self.mesh.dirichlet_nodes[:].flatten()
-
-        I_D_mask = np.isin(I, dirichlet_nodes)
-        J_D_mask = np.isin(J, dirichlet_nodes)
-        K_D_mask = np.isin(K, dirichlet_nodes)
+        I_D_mask = np.isin(I, bnodes)
+        J_D_mask = np.isin(J, bnodes)
+        K_D_mask = np.isin(K, bnodes)
 
         I_D, J_D, K_D = I[I_D_mask], J[J_D_mask], K[K_D_mask]
 
@@ -383,25 +394,25 @@ class MpfadScheme(object):
             self.in_vols_pairs[K_D_mask, 0],
             self.in_vols_pairs[K_D_mask, 1])
 
-        I_D_term = 0.5 * Keq_N[I_D_mask] * D_JK[I_D_mask] * gD[I_D]
+        I_D_term = 0.5 * Keq_N[I_D_mask] * D_JK[I_D_mask] * bvalues[I_D]
         J_D_term = 0.5 * Keq_N[J_D_mask] * (
-            D_JI[J_D_mask] - D_JK[J_D_mask]) * gD[J_D]
-        K_D_term = -0.5 * Keq_N[K_D_mask] * D_JI[K_D_mask] * gD[K_D]
+            D_JI[J_D_mask] - D_JK[J_D_mask]) * bvalues[J_D]
+        K_D_term = -0.5 * Keq_N[K_D_mask] * D_JI[K_D_mask] * bvalues[K_D]
 
-        q_D_cdt = np.zeros(len(self.mesh.volumes))
+        q_cdt = np.zeros(len(self.mesh.volumes))
 
-        np.add.at(q_D_cdt, I_D_left_vol, I_D_term)
-        np.add.at(q_D_cdt, I_D_right_vol, -I_D_term)
+        np.add.at(q_cdt, I_D_left_vol, I_D_term)
+        np.add.at(q_cdt, I_D_right_vol, -I_D_term)
 
-        np.add.at(q_D_cdt, J_D_left_vol, J_D_term)
-        np.add.at(q_D_cdt, J_D_right_vol, -J_D_term)
+        np.add.at(q_cdt, J_D_left_vol, J_D_term)
+        np.add.at(q_cdt, J_D_right_vol, -J_D_term)
 
-        np.add.at(q_D_cdt, K_D_left_vol, K_D_term)
-        np.add.at(q_D_cdt, K_D_right_vol, -K_D_term)
+        np.add.at(q_cdt, K_D_left_vol, K_D_term)
+        np.add.at(q_cdt, K_D_right_vol, -K_D_term)
 
-        q_D_cdt *= -1
+        q_cdt *= -1
 
-        return q_D_cdt
+        return q_cdt
 
     def _handle_dirichlet_bc(self):
         """Computes the contribution of the dirichlet boundary
