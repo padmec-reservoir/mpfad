@@ -149,6 +149,7 @@ class GlsInterpolation(BaseInterpolation):
         in_faces = self.mesh.faces.internal[:]
         neumann_faces_flag = self.mesh.neumann_faces[:].flatten()
         neumann_faces = self.mesh.faces.all[neumann_faces_flag == 1]
+        gN = self.mesh.neumann[:].flatten()
 
         faces_around_neu_nodes = self.mesh.nodes.bridge_adjacencies(
             neumann_nodes, 1, 2)
@@ -165,7 +166,6 @@ class GlsInterpolation(BaseInterpolation):
         for v, KSetv, Sv, Svb in zip(
                 neumann_nodes, vols_around_neu_nodes,
                 in_faces_around_neu_nodes, neu_faces_around_neu_nodes):
-            meq = 0
             nK = len(KSetv)
             nS = len(Sv)
             nb = len(Svb)
@@ -175,71 +175,80 @@ class GlsInterpolation(BaseInterpolation):
 
             xv = self.mesh.nodes.coords[v]
 
-            Ks_Sv = self.mesh.faces.bridge_adjacencies(Sv, 2, 3)
-            Ks_Svb = self.mesh.faces.bridge_adjacencies(Svb, 2, 3)
-
             if len(Sv) == 1:
                 Ks_Sv = Ks_Sv.reshape((1, len(Ks_Sv)))
 
-            for Ki in KSetv:
-                xKi = self.mesh.volumes.center[Ki].flatten()
+            xv = self.mesh.nodes.coords[v]
+            xK = self.mesh.volumes.center[KSetv]
+            dKv = xK - xv
 
-                Mb[meq, (3 * meq):(3 * (meq + 1))] = xKi - xv
-                Mb[meq, (3 * nK)] = 1
-                Nb[meq, meq] = 1
+            KSetV_range = np.arange(nK)
+            Mb[KSetV_range, 3 * KSetV_range] = dKv[:, 0]
+            Mb[KSetV_range, 3 * KSetV_range + 1] = dKv[:, 1]
+            Mb[KSetV_range, 3 * KSetV_range + 2] = dKv[:, 2]
+            Mb[KSetV_range, 3 * nK] = 1.0
 
-                meq += 1
+            Nb[KSetV_range, KSetV_range] = 1.0
 
-            for sj, Kj in zip(Sv, Ks_Sv):
-                K1, K2 = Kj[0], Kj[1]
-                i_j1 = np.where(KSetv == K1)[0][0]
-                i_j2 = np.where(KSetv == K2)[0][0]
+            Sv_in_idx = np.isin(in_faces, Sv, assume_unique=True).nonzero()[0]
+            Ks_Sv = self.in_vols_pairs[Sv_in_idx, :]
+            sorter = np.argsort(KSetv)
+            Ij1 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 0], sorter=sorter)]
+            Ij2 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 1], sorter=sorter)]
 
-                L1, L2 = self.mesh.permeability[Kj].reshape((2, 3, 3))
+            xS = self.mesh.faces.center[Sv]
+            eta_j = np.max(self.A[Ks_Sv], axis=1)
+            N_sj = self.Ns[Sv]
+            T_sj1 = xv - xS
+            T_sj2 = np.cross(N_sj, T_sj1)
+            tau_j2 = np.linalg.norm(T_sj2, axis=1) ** (-eta_j)
+            tau_tsj2 = tau_j2[:, np.newaxis] * T_sj2
 
-                eta_j = np.max(self.A[Kj])
+            L1 = self.mesh.permeability[Ks_Sv[:, 0]].reshape((nS, 3, 3))
+            L2 = self.mesh.permeability[Ks_Sv[:, 1]].reshape((nS, 3, 3))
+            nL1 = np.einsum("ij,ikj->ik", N_sj, L1)
+            nL2 = np.einsum("ij,ikj->ik", N_sj, L2)
 
-                x_sj = self.mesh.faces.center[sj]
-                sj_nodes = self.mesh.faces.connectivities[sj]
-                sj_nodes_coords = self.mesh.nodes.coords[sj_nodes]
-                I, J, K = sj_nodes_coords[0], sj_nodes_coords[1], sj_nodes_coords[2]
+            idx1 = np.arange(start=nK, stop=nK + 3 * nS - 2, step=3)
+            idx2 = np.arange(start=nK + 1, stop=nK + 3 * nS - 1, step=3)
+            idx3 = np.arange(start=nK + 2, stop=nK + 3 * nS, step=3)
 
-                N_sj = np.cross(I - J, I - K)
-                n_sj = N_sj / np.linalg.norm(N_sj)
+            Mb[idx1, 3 * Ij1] = -nL1[:, 0]
+            Mb[idx1, 3 * Ij1 + 1] = -nL1[:, 1]
+            Mb[idx1, 3 * Ij1 + 2] = -nL1[:, 2]
 
-                t_sj1 = xv - x_sj
-                t_sj2 = np.cross(n_sj, t_sj1)
+            Mb[idx1, 3 * Ij2] = nL2[:, 0]
+            Mb[idx1, 3 * Ij2 + 1] = nL2[:, 1]
+            Mb[idx1, 3 * Ij2 + 2] = nL2[:, 2]
 
-                tau_j2 = np.linalg.norm(t_sj2) ** (-eta_j)
+            Mb[idx2, 3 * Ij1] = -T_sj1[:, 0]
+            Mb[idx2, 3 * Ij1 + 1] = -T_sj1[:, 1]
+            Mb[idx2, 3 * Ij1 + 2] = -T_sj1[:, 2]
 
-                meq += 1
-                Mb[meq - 1, (3 * i_j1):(3 * (i_j1 + 1))] = - n_sj @ L1
-                Mb[meq - 1, (3 * i_j2):(3 * (i_j2 + 1))] = n_sj @ L2
+            Mb[idx2, 3 * Ij2] = T_sj1[:, 0]
+            Mb[idx2, 3 * Ij2 + 1] = T_sj1[:, 1]
+            Mb[idx2, 3 * Ij2 + 2] = T_sj1[:, 2]
 
-                meq += 1
-                Mb[meq - 1, (3 * i_j1):(3 * (i_j1 + 1))] = - t_sj1
-                Mb[meq - 1, (3 * i_j2):(3 * (i_j2 + 1))] = t_sj1
+            Mb[idx3, 3 * Ij1] = -tau_tsj2[:, 0]
+            Mb[idx3, 3 * Ij1 + 1] = -tau_tsj2[:, 1]
+            Mb[idx3, 3 * Ij1 + 2] = -tau_tsj2[:, 2]
 
-                meq += 1
-                Mb[meq - 1, (3 * i_j1):(3 * (i_j1 + 1))] = - tau_j2 * t_sj2
-                Mb[meq - 1, (3 * i_j2):(3 * (i_j2 + 1))] = tau_j2 * t_sj2
+            Mb[idx3, 3 * Ij2] = tau_tsj2[:, 0]
+            Mb[idx3, 3 * Ij2 + 1] = tau_tsj2[:, 1]
+            Mb[idx3, 3 * Ij2 + 2] = tau_tsj2[:, 2]
 
-            for svb, Kb in zip(Svb, Ks_Svb):
-                ik = np.where(KSetv == Kb)[0][0]
-                L = self.mesh.permeability[Kb].reshape((3, 3))
+            idx4 = np.arange(start=nK + 3 * nS, stop=nK + 3 * nS + nb)
+            Ks_Svb = self.mesh.faces.bridge_adjacencies(Svb, 2, 3).flatten()
+            Ik = sorter[np.searchsorted(KSetv, Ks_Svb, sorter=sorter)]
+            N_svb = self.Ns[Svb]
+            L = self.mesh.permeability[Ks_Svb].reshape((nb, 3, 3))
+            nL = np.einsum("ij,ikj->ik", N_svb, L)
 
-                gN = self.mesh.neumann[svb][0, 0]
+            Mb[idx4, 3 * Ik] = -nL[:, 0]
+            Mb[idx4, 3 * Ik + 1] = -nL[:, 1]
+            Mb[idx4, 3 * Ik + 2] = -nL[:, 2]
 
-                svb_nodes = self.mesh.faces.connectivities[svb]
-                svb_nodes_coords = self.mesh.nodes.coords[svb_nodes]
-                I, J, K = svb_nodes_coords[0], svb_nodes_coords[1], svb_nodes_coords[2]
-
-                N_svb = np.cross(I - J, I - K)
-                n_svb = N_svb / np.linalg.norm(N_svb)
-
-                meq += 1
-                Mb[meq - 1, (3 * ik):(3 * (ik + 1))] = - n_svb @ L
-                Nb[meq - 1, nK] = gN
+            Nb[idx4, nK] = gN[Svb]
 
             M = np.linalg.inv(Mb.T @ Mb) @ (Mb.T @ Nb)
             w = M[-1, :]
