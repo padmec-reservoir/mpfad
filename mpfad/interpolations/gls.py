@@ -51,10 +51,11 @@ class GlsInterpolation(BaseInterpolation):
                 len(all_nodes), len(self.mesh.volumes)))
         else:
             W_neu = csr_matrix((len(all_nodes), len(self.mesh.volumes)))
+            neu_ws = None
 
         W = W_in + W_neu
 
-        return W
+        return W, neu_ws
 
     def _interpolate_internal_nodes(self, in_nodes):
         vols_around_in_nodes = self.mesh.nodes.bridge_adjacencies(
