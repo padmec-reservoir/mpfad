@@ -78,64 +78,7 @@ class GlsInterpolation(BaseInterpolation):
             Mv = np.zeros((nK + 3 * nS, 3 * nK + 1))
             Nv = np.zeros((nK + 3 * nS, nK))
 
-            xv = self.mesh.nodes.coords[v]
-            xK = self.mesh.volumes.center[KSetv]
-            dKv = xK - xv
-
-            KSetV_range = np.arange(nK)
-            Mv[KSetV_range, 3 * KSetV_range] = dKv[:, 0]
-            Mv[KSetV_range, 3 * KSetV_range + 1] = dKv[:, 1]
-            Mv[KSetV_range, 3 * KSetV_range + 2] = dKv[:, 2]
-            Mv[KSetV_range, 3 * nK] = 1.0
-
-            Nv[KSetV_range, KSetV_range] = 1.0
-
-            Sv_in_idx = np.isin(in_faces, Sv, assume_unique=True).nonzero()[0]
-            Ks_Sv = self.in_vols_pairs[Sv_in_idx, :]
-            sorter = np.argsort(KSetv)
-            Ij1 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 0], sorter=sorter)]
-            Ij2 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 1], sorter=sorter)]
-
-            xS = self.mesh.faces.center[Sv]
-            eta_j = np.max(self.A[Ks_Sv], axis=1)
-            N_sj = self.Ns[Sv]
-            T_sj1 = xv - xS
-            T_sj2 = np.cross(N_sj, T_sj1)
-            tau_j2 = np.linalg.norm(T_sj2, axis=1) ** (-eta_j)
-            tau_tsj2 = tau_j2[:, np.newaxis] * T_sj2
-
-            L1 = self.mesh.permeability[Ks_Sv[:, 0]].reshape((nS, 3, 3))
-            L2 = self.mesh.permeability[Ks_Sv[:, 1]].reshape((nS, 3, 3))
-            nL1 = np.einsum("ij,ikj->ik", N_sj, L1)
-            nL2 = np.einsum("ij,ikj->ik", N_sj, L2)
-
-            idx1 = np.arange(start=nK, stop=nK + 3 * nS - 2, step=3)
-            idx2 = np.arange(start=nK + 1, stop=nK + 3 * nS - 1, step=3)
-            idx3 = np.arange(start=nK + 2, stop=nK + 3 * nS, step=3)
-
-            Mv[idx1, 3 * Ij1] = -nL1[:, 0]
-            Mv[idx1, 3 * Ij1 + 1] = -nL1[:, 1]
-            Mv[idx1, 3 * Ij1 + 2] = -nL1[:, 2]
-
-            Mv[idx1, 3 * Ij2] = nL2[:, 0]
-            Mv[idx1, 3 * Ij2 + 1] = nL2[:, 1]
-            Mv[idx1, 3 * Ij2 + 2] = nL2[:, 2]
-
-            Mv[idx2, 3 * Ij1] = -T_sj1[:, 0]
-            Mv[idx2, 3 * Ij1 + 1] = -T_sj1[:, 1]
-            Mv[idx2, 3 * Ij1 + 2] = -T_sj1[:, 2]
-
-            Mv[idx2, 3 * Ij2] = T_sj1[:, 0]
-            Mv[idx2, 3 * Ij2 + 1] = T_sj1[:, 1]
-            Mv[idx2, 3 * Ij2 + 2] = T_sj1[:, 2]
-
-            Mv[idx3, 3 * Ij1] = -tau_tsj2[:, 0]
-            Mv[idx3, 3 * Ij1 + 1] = -tau_tsj2[:, 1]
-            Mv[idx3, 3 * Ij1 + 2] = -tau_tsj2[:, 2]
-
-            Mv[idx3, 3 * Ij2] = tau_tsj2[:, 0]
-            Mv[idx3, 3 * Ij2 + 1] = tau_tsj2[:, 1]
-            Mv[idx3, 3 * Ij2 + 2] = tau_tsj2[:, 2]
+            self._assemble_ls_matrices(Mv, Nv, v, KSetv, Sv)
 
             M = np.linalg.inv(Mv.T @ Mv) @ (Mv.T @ Nv)
             w = M[-1, :]
@@ -174,82 +117,23 @@ class GlsInterpolation(BaseInterpolation):
             Mb = np.zeros((nK + 3 * nS + nb, 3 * nK + 1))
             Nb = np.zeros((nK + 3 * nS + nb, nK + 1))
 
-            xv = self.mesh.nodes.coords[v]
+            self._assemble_ls_matrices(Mb, Nb, v, KSetv, Sv)
 
-            if len(Sv) == 1:
-                Ks_Sv = Ks_Sv.reshape((1, len(Ks_Sv)))
+            neu_rows = np.arange(start=nK + 3 * nS, stop=nK + 3 * nS + nb)
 
-            xv = self.mesh.nodes.coords[v]
-            xK = self.mesh.volumes.center[KSetv]
-            dKv = xK - xv
-
-            KSetV_range = np.arange(nK)
-            Mb[KSetV_range, 3 * KSetV_range] = dKv[:, 0]
-            Mb[KSetV_range, 3 * KSetV_range + 1] = dKv[:, 1]
-            Mb[KSetV_range, 3 * KSetV_range + 2] = dKv[:, 2]
-            Mb[KSetV_range, 3 * nK] = 1.0
-
-            Nb[KSetV_range, KSetV_range] = 1.0
-
-            Sv_in_idx = np.isin(in_faces, Sv, assume_unique=True).nonzero()[0]
-            Ks_Sv = self.in_vols_pairs[Sv_in_idx, :]
-            sorter = np.argsort(KSetv)
-            Ij1 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 0], sorter=sorter)]
-            Ij2 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 1], sorter=sorter)]
-
-            xS = self.mesh.faces.center[Sv]
-            eta_j = np.max(self.A[Ks_Sv], axis=1)
-            N_sj = self.Ns[Sv]
-            T_sj1 = xv - xS
-            T_sj2 = np.cross(N_sj, T_sj1)
-            tau_j2 = np.linalg.norm(T_sj2, axis=1) ** (-eta_j)
-            tau_tsj2 = tau_j2[:, np.newaxis] * T_sj2
-
-            L1 = self.mesh.permeability[Ks_Sv[:, 0]].reshape((nS, 3, 3))
-            L2 = self.mesh.permeability[Ks_Sv[:, 1]].reshape((nS, 3, 3))
-            nL1 = np.einsum("ij,ikj->ik", N_sj, L1)
-            nL2 = np.einsum("ij,ikj->ik", N_sj, L2)
-
-            idx1 = np.arange(start=nK, stop=nK + 3 * nS - 2, step=3)
-            idx2 = np.arange(start=nK + 1, stop=nK + 3 * nS - 1, step=3)
-            idx3 = np.arange(start=nK + 2, stop=nK + 3 * nS, step=3)
-
-            Mb[idx1, 3 * Ij1] = -nL1[:, 0]
-            Mb[idx1, 3 * Ij1 + 1] = -nL1[:, 1]
-            Mb[idx1, 3 * Ij1 + 2] = -nL1[:, 2]
-
-            Mb[idx1, 3 * Ij2] = nL2[:, 0]
-            Mb[idx1, 3 * Ij2 + 1] = nL2[:, 1]
-            Mb[idx1, 3 * Ij2 + 2] = nL2[:, 2]
-
-            Mb[idx2, 3 * Ij1] = -T_sj1[:, 0]
-            Mb[idx2, 3 * Ij1 + 1] = -T_sj1[:, 1]
-            Mb[idx2, 3 * Ij1 + 2] = -T_sj1[:, 2]
-
-            Mb[idx2, 3 * Ij2] = T_sj1[:, 0]
-            Mb[idx2, 3 * Ij2 + 1] = T_sj1[:, 1]
-            Mb[idx2, 3 * Ij2 + 2] = T_sj1[:, 2]
-
-            Mb[idx3, 3 * Ij1] = -tau_tsj2[:, 0]
-            Mb[idx3, 3 * Ij1 + 1] = -tau_tsj2[:, 1]
-            Mb[idx3, 3 * Ij1 + 2] = -tau_tsj2[:, 2]
-
-            Mb[idx3, 3 * Ij2] = tau_tsj2[:, 0]
-            Mb[idx3, 3 * Ij2 + 1] = tau_tsj2[:, 1]
-            Mb[idx3, 3 * Ij2 + 2] = tau_tsj2[:, 2]
-
-            idx4 = np.arange(start=nK + 3 * nS, stop=nK + 3 * nS + nb)
             Ks_Svb = self.mesh.faces.bridge_adjacencies(Svb, 2, 3).flatten()
+            sorter = np.argsort(KSetv)
             Ik = sorter[np.searchsorted(KSetv, Ks_Svb, sorter=sorter)]
+
             N_svb = self.Ns[Svb]
             L = self.mesh.permeability[Ks_Svb].reshape((nb, 3, 3))
             nL = np.einsum("ij,ikj->ik", N_svb, L)
 
-            Mb[idx4, 3 * Ik] = -nL[:, 0]
-            Mb[idx4, 3 * Ik + 1] = -nL[:, 1]
-            Mb[idx4, 3 * Ik + 2] = -nL[:, 2]
+            Mb[neu_rows, 3 * Ik] = -nL[:, 0]
+            Mb[neu_rows, 3 * Ik + 1] = -nL[:, 1]
+            Mb[neu_rows, 3 * Ik + 2] = -nL[:, 2]
 
-            Nb[idx4, nK] = gN[Svb]
+            Nb[neu_rows, nK] = gN[Svb]
 
             M = np.linalg.inv(Mb.T @ Mb) @ (Mb.T @ Nb)
             w = M[-1, :]
@@ -261,6 +145,71 @@ class GlsInterpolation(BaseInterpolation):
             neu_ws.append(wc)
 
         return ws, vols_around_neu_nodes, neu_ws
+
+    def _assemble_ls_matrices(self, Mi, Ni, v, KSetv, Sv):
+        nK = len(KSetv)
+        nS = len(Sv)
+
+        xv = self.mesh.nodes.coords[v]
+        xK = self.mesh.volumes.center[KSetv]
+        dKv = xK - xv
+
+        KSetV_range = np.arange(nK)
+        Mi[KSetV_range, 3 * KSetV_range] = dKv[:, 0]
+        Mi[KSetV_range, 3 * KSetV_range + 1] = dKv[:, 1]
+        Mi[KSetV_range, 3 * KSetV_range + 2] = dKv[:, 2]
+        Mi[KSetV_range, 3 * nK] = 1.0
+
+        Ni[KSetV_range, KSetV_range] = 1.0
+
+        Sv_in_idx = np.isin(
+            self.mesh.faces.internal[:],
+            Sv, assume_unique=True).nonzero()[0]
+        Ks_Sv = self.in_vols_pairs[Sv_in_idx, :]
+        sorter = np.argsort(KSetv)
+        Ij1 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 0], sorter=sorter)]
+        Ij2 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 1], sorter=sorter)]
+
+        xS = self.mesh.faces.center[Sv]
+        eta_j = np.max(self.A[Ks_Sv], axis=1)
+        N_sj = self.Ns[Sv]
+        T_sj1 = xv - xS
+        T_sj2 = np.cross(N_sj, T_sj1)
+        tau_j2 = np.linalg.norm(T_sj2, axis=1) ** (-eta_j)
+        tau_tsj2 = tau_j2[:, np.newaxis] * T_sj2
+
+        L1 = self.mesh.permeability[Ks_Sv[:, 0]].reshape((nS, 3, 3))
+        L2 = self.mesh.permeability[Ks_Sv[:, 1]].reshape((nS, 3, 3))
+        nL1 = np.einsum("ij,ikj->ik", N_sj, L1)
+        nL2 = np.einsum("ij,ikj->ik", N_sj, L2)
+
+        idx1 = np.arange(start=nK, stop=nK + 3 * nS - 2, step=3)
+        idx2 = np.arange(start=nK + 1, stop=nK + 3 * nS - 1, step=3)
+        idx3 = np.arange(start=nK + 2, stop=nK + 3 * nS, step=3)
+
+        Mi[idx1, 3 * Ij1] = -nL1[:, 0]
+        Mi[idx1, 3 * Ij1 + 1] = -nL1[:, 1]
+        Mi[idx1, 3 * Ij1 + 2] = -nL1[:, 2]
+
+        Mi[idx1, 3 * Ij2] = nL2[:, 0]
+        Mi[idx1, 3 * Ij2 + 1] = nL2[:, 1]
+        Mi[idx1, 3 * Ij2 + 2] = nL2[:, 2]
+
+        Mi[idx2, 3 * Ij1] = -T_sj1[:, 0]
+        Mi[idx2, 3 * Ij1 + 1] = -T_sj1[:, 1]
+        Mi[idx2, 3 * Ij1 + 2] = -T_sj1[:, 2]
+
+        Mi[idx2, 3 * Ij2] = T_sj1[:, 0]
+        Mi[idx2, 3 * Ij2 + 1] = T_sj1[:, 1]
+        Mi[idx2, 3 * Ij2 + 2] = T_sj1[:, 2]
+
+        Mi[idx3, 3 * Ij1] = -tau_tsj2[:, 0]
+        Mi[idx3, 3 * Ij1 + 1] = -tau_tsj2[:, 1]
+        Mi[idx3, 3 * Ij1 + 2] = -tau_tsj2[:, 2]
+
+        Mi[idx3, 3 * Ij2] = tau_tsj2[:, 0]
+        Mi[idx3, 3 * Ij2 + 1] = tau_tsj2[:, 1]
+        Mi[idx3, 3 * Ij2 + 2] = tau_tsj2[:, 2]
 
     def _set_internal_vols_pairs(self):
         """Set the pairs of volumes sharing an internal face in the 
