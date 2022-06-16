@@ -97,7 +97,7 @@ class GlsInterpolation(BaseInterpolation):
 
             xS = self.mesh.faces.center[Sv]
             eta_j = np.max(self.A[Ks_Sv], axis=1)
-            N_sj = self.Ns[Sv_in_idx]
+            N_sj = self.Ns[Sv]
             T_sj1 = xv - xS
             T_sj2 = np.cross(N_sj, T_sj1)
             tau_j2 = np.linalg.norm(T_sj2, axis=1) ** (-eta_j)
@@ -269,8 +269,7 @@ class GlsInterpolation(BaseInterpolation):
             internal_faces, 2, 3)
 
     def _set_normal_vectors(self):
-        """Set the attribute `Ns` which stores the normal vectors 
-        to the internal faces.
+        """Compute and store the normal vectors and their norms.
 
         Parameters
         ----------
@@ -281,38 +280,22 @@ class GlsInterpolation(BaseInterpolation):
         None
         """
         # Retrieve the internal faces.
-        internal_faces = self.mesh.faces.internal[:]
+        all_faces = self.mesh.faces.all[:]
 
         # Retrieve the points that form the components of the normal vectors.
-        internal_faces_nodes = self.mesh.faces.bridge_adjacencies(
-            internal_faces,
-            0, 0)
-        I_idx = internal_faces_nodes[:, 0]
-        J_idx = internal_faces_nodes[:, 1]
-        K_idx = internal_faces_nodes[:, 2]
+        faces_nodes = self.mesh.faces.bridge_adjacencies(all_faces, 0, 0)
+        I_idx = faces_nodes[:, 0]
+        J_idx = faces_nodes[:, 1]
+        K_idx = faces_nodes[:, 2]
 
         I = self.mesh.nodes.coords[I_idx]
         J = self.mesh.nodes.coords[J_idx]
         K = self.mesh.nodes.coords[K_idx]
 
-        n_vols_pairs = len(internal_faces)
-        internal_volumes_centers_flat = self.mesh.volumes.center[self.in_vols_pairs.flatten(
-        )]
-        internal_volumes_centers = internal_volumes_centers_flat.reshape((
-            n_vols_pairs,
-            2, 3))
-
-        LJ = J - internal_volumes_centers[:, 0]
-
         # Set the normal vectors.
         Ns = np.cross(I - J, K - J)
         self.Ns_norm = np.linalg.norm(Ns, axis=1)
         self.Ns = Ns / self.Ns_norm[:, np.newaxis]
-
-        # N_sign = np.sign(np.einsum("ij,ij->i", LJ, self.Ns))
-        # (self.in_vols_pairs[N_sign < 0, 0],
-        #  self.in_vols_pairs[N_sign < 0, 1]) = (self.in_vols_pairs[N_sign < 0, 1],
-        #                                        self.in_vols_pairs[N_sign < 0, 0])
 
     def _compute_diffusion_magnitude(self):
         nvols = len(self.mesh.volumes)
