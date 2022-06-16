@@ -32,4 +32,6 @@ class IdwInterpolation(BaseInterpolation):
         W = csr_matrix((D_inv, (nodes_idx, vols_around_flat)),
                        shape=(len(all_nodes), len(self.mesh.volumes)))
 
-        return W
+        neu_ws = np.zeros(len(all_nodes))
+
+        return W, neu_ws
