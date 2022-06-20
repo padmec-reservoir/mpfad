@@ -8,10 +8,6 @@ class MpfadScheme(object):
         self.mesh = mesh
         self.interpolation = interpolation
 
-        n = len(self.mesh.volumes)
-        self.A = lil_matrix((n, n))
-        self.q = np.zeros(n)
-
         # Pairs of volumes sharing an internal face.
         self.in_vols_pairs = None
 
@@ -521,3 +517,7 @@ class MpfadScheme(object):
             np.add.at(q_N, neumann_volumes, neumann_values)
 
         return q_N
+
+
+class FlsScheme(MpfadScheme):
+    pass
