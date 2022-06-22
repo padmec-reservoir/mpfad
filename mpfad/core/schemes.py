@@ -520,4 +520,208 @@ class MpfadScheme(object):
 
 
 class FlsScheme(MpfadScheme):
-    pass
+    def assemble(self):
+        self._set_internal_vols_pairs()
+        self._set_normal_vectors()
+        self._set_normal_distances()
+        self._set_normal_permeabilities()
+
+        T_tpfa_in = self._assemble_tpfa_matrix()
+        T_cdt, F_cdt_in = self._assemble_cdt_matrix()
+
+        T_D_tpfa, F_D_tpfa, F_D_cdt = self._handle_dirichlet_bc()
+        F_N_tpfa = self._handle_neumann_bc()
+
+        T_tpfa = T_tpfa_in + T_D_tpfa
+        F_tpfa = F_D_tpfa + F_N_tpfa
+        F_cdt = F_cdt_in + F_D_cdt
+
+    def apply_flux_limitation(self):
+        pass
+
+    def _assemble_tpfa_matrix(self):
+        # Compute the face transmissibilities.
+        Kn_prod = self.Kn_L * self.Kn_R
+        Keq = Kn_prod / ((self.Kn_L * self.h_R) +
+                         (self.Kn_R * self.h_L))
+        faces_trans = Keq * self.Ns_norm
+
+        # Construct the face transmissibilities matrix.
+        n_vols = len(self.mesh.volumes)
+        n_faces = len(self.mesh.faces)
+
+        faces_idx = np.tile(self.mesh.faces.internal[:], 2)
+        vols_idx = self.in_vols_pairs.flatten(order="F")
+
+        data = np.hstack((-faces_trans, -faces_trans))
+
+        T_tpfa_in = csr_matrix(
+            (data, (faces_idx, vols_idx)),
+            shape=(n_faces, n_vols))
+
+        return T_tpfa_in
+
+    def _assemble_cdt_matrix(self):
+        # Compute the cross diffusion coefficients.
+        D_JK, D_JI = self._compute_cdt_terms()
+
+        # Compute the weights for the interpolation of the pressure in a node.
+        W, neu_ws = self.interpolation.interpolate()
+
+        # Find the connectivities of the internal faces.
+        in_faces = self.mesh.faces.internal
+        in_faces_nodes = self.mesh.faces.bridge_adjacencies(in_faces, 0, 0)
+        I, J, K = (
+            in_faces_nodes[:, 0],
+            in_faces_nodes[:, 1],
+            in_faces_nodes[:, 2])
+
+        # Compute the face transmissibilities.
+        Kn_prod = self.Kn_L * self.Kn_R
+        Keq = Kn_prod / ((self.Kn_L * self.h_R) +
+                         (self.Kn_R * self.h_L))
+        Keq_N = self.Ns_norm * Keq
+
+        # Assemble the CDT matrix.
+        n_faces = len(self.mesh.faces)
+        n_nodes = len(self.mesh.nodes)
+
+        faces_idx = np.tile(in_faces, 3)
+        nodes_idx = np.hstack((I, J, K))
+        V_data = 0.5 * np.hstack((D_JK * Keq_N,
+                                 (D_JI - D_JK) * Keq_N, -D_JI * Keq_N))
+
+        V = csr_matrix(
+            (V_data, (faces_idx, nodes_idx)),
+            shape=(n_faces, n_nodes))
+
+        T_cdt = V @ W
+
+        dirichlet_nodes_flags = self.mesh.dirichlet_nodes_flag[:].flatten()
+        dirichlet_nodes = self.mesh.nodes.all[dirichlet_nodes_flags == 1]
+        gD = self.mesh.dirichlet_nodes[:].flatten()
+
+        neumann_nodes_flag = self.mesh.neumann_nodes_flag[:].flatten()
+        neumann_nodes = self.mesh.nodes.all[neumann_nodes_flag == 1]
+
+        F_cdt_D = self._compute_boundary_contribution(
+            dirichlet_nodes, gD, I, J, K, D_JK, D_JI, Keq_N)
+        F_cdt_N = self._compute_boundary_contribution(
+            neumann_nodes, neu_ws, I, J, K, D_JK, D_JI, Keq_N)
+
+        F_cdt_in = F_cdt_D + F_cdt_N
+
+        return T_cdt, F_cdt_in
+
+    def _handle_dirichlet_bc(self):
+        bfaces = self.mesh.faces.boundary[:]
+        bfaces_dirichlet_values = self.mesh.dirichlet_faces[bfaces].flatten()
+        dirichlet_faces = bfaces[bfaces_dirichlet_values == 1]
+
+        dirichlet_nodes = self.mesh.faces.bridge_adjacencies(
+            dirichlet_faces, 0, 0)
+        dirichlet_volumes = self.mesh.faces.bridge_adjacencies(
+            dirichlet_faces, 2, 3).flatten()
+
+        L = self.mesh.volumes.center[dirichlet_volumes]
+        I_idx, J_idx, K_idx = (
+            dirichlet_nodes[:, 0],
+            dirichlet_nodes[:, 1],
+            dirichlet_nodes[:, 2])
+        I, J, K = (
+            self.mesh.nodes.coords[I_idx],
+            self.mesh.nodes.coords[J_idx],
+            self.mesh.nodes.coords[K_idx])
+
+        N = 0.5 * np.cross(I - J, K - J)
+
+        LJ = J - L
+        N_test = np.sign(np.einsum("ij,ij->i", LJ, N))
+        I[N_test < 0], K[N_test < 0] = K[N_test < 0], I[N_test < 0]
+        N = 0.5 * np.cross(I - J, K - J)
+
+        N_norm = np.linalg.norm(N, axis=1)
+
+        tau_JK = np.cross(N, K - J)
+        tau_JI = np.cross(N, I - J)
+
+        h_L = np.abs(np.einsum("ij,ij->i", N, LJ) / N_norm)
+
+        K_all = self.mesh.permeability[dirichlet_volumes].reshape(
+            (len(dirichlet_volumes), 3, 3))
+
+        Kn_L_partial = np.einsum("ij,ikj->ik", N, K_all)
+        Kn_L = np.einsum("ij,ij->i", Kn_L_partial, N) / (N_norm ** 2)
+
+        Kt_JK = np.einsum("ij,ij->i", Kn_L_partial, tau_JK) / (N_norm ** 2)
+        Kt_JI = np.einsum("ij,ij->i", Kn_L_partial, tau_JI) / (N_norm ** 2)
+
+        D_JI = -(np.einsum("ij,ij->i", tau_JK, LJ)
+                 * Kn_L) / (2 * N_norm * h_L) + Kt_JK / 2
+        D_JK = -(np.einsum("ij,ij->i", tau_JI, LJ)
+                 * Kn_L) / (2 * N_norm * h_L) + Kt_JI / 2
+
+        gD = self.mesh.dirichlet_nodes[dirichlet_nodes.flatten()].reshape(
+            dirichlet_nodes.shape[0], 3)
+        gD_I, gD_J, gD_K = gD[:, 0], gD[:, 1], gD[:, 2]
+        gD_I[N_test < 0], gD_K[N_test < 0] = gD_K[N_test < 0], gD_I[N_test < 0]
+
+        tpfa_bc_lhs = (Kn_L * N_norm) / h_L
+
+        tpfa_bc_rhs = (Kn_L * N_norm / h_L) * gD_J
+        cdt_bc_rhs = D_JI * (gD_J - gD_I) + D_JK * (gD_K - gD_J)
+
+        n_vols = len(self.mesh.volumes)
+        n_faces = len(self.mesh.faces)
+
+        T_D_tpfa = csr_matrix(
+            (tpfa_bc_lhs, (dirichlet_faces, dirichlet_volumes)),
+            shape=(n_faces, n_vols))
+
+        F_D_tpfa = np.zeros(n_faces)
+        F_D_cdt = np.zeros(n_faces)
+
+        F_D_tpfa[dirichlet_faces] += tpfa_bc_rhs
+        F_D_cdt[dirichlet_faces] += cdt_bc_rhs
+
+        return T_D_tpfa, F_D_tpfa, F_D_cdt
+
+    def _handle_neumann_bc(self):
+        bfaces = self.mesh.faces.boundary[:]
+        bfaces_neumann_values = self.mesh.neumann[bfaces].flatten()
+        neumann_faces = bfaces[bfaces_neumann_values != 0]
+        neumann_values = bfaces_neumann_values[bfaces_neumann_values != 0]
+
+        F_N_tpfa = np.zeros(len(self.mesh.faces))
+
+        if len(neumann_faces) > 0:
+            F_N_tpfa[neumann_faces] = neumann_values
+
+        return F_N_tpfa
+
+    def _compute_boundary_contribution(
+            self, bnodes, bvalues, I, J, K, D_JK, D_JI, Keq_N):
+        in_faces = self.mesh.faces.internal[:]
+
+        I_mask = np.isin(I, bnodes)
+        J_mask = np.isin(J, bnodes)
+        K_mask = np.isin(K, bnodes)
+
+        I_faces = in_faces[I_mask]
+        J_faces = in_faces[J_mask]
+        K_faces = in_faces[K_mask]
+
+        I_D, J_D, K_D = I[I_mask], J[J_mask], K[K_mask]
+
+        I_D_term = 0.5 * Keq_N[I_mask] * D_JK[I_mask] * bvalues[I_D]
+        J_D_term = 0.5 * Keq_N[J_mask] * (
+            D_JI[J_mask] - D_JK[J_mask]) * bvalues[J_D]
+        K_D_term = -0.5 * Keq_N[K_mask] * D_JI[K_mask] * bvalues[K_D]
+
+        F_cdt_i = np.zeros(len(self.mesh.faces))
+
+        np.add.at(F_cdt_i, I_faces, I_D_term)
+        np.add.at(F_cdt_i, J_faces, J_D_term)
+        np.add.at(F_cdt_i, K_faces, K_D_term)
+
+        return F_cdt_i
