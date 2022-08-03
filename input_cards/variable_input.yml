@@ -75,3 +75,10 @@ pressure_exact:
   data type: float
   sparse: True
   level: 0
+
+source_term:
+  type: volumes
+  data size: 1
+  data type: float
+  sparse: True
+  level: 0
