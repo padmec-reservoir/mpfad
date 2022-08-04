@@ -1,5 +1,4 @@
 from utils import run_example
-from preprocessor.meshHandle.finescaleMesh import FineScaleMesh
 import numpy as np
 import sys
 

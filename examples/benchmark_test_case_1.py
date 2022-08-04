@@ -1,5 +1,4 @@
 from utils import run_example
-from preprocessor.meshHandle.finescaleMesh import FineScaleMesh
 import numpy as np
 import sys
 
@@ -7,8 +6,6 @@ import sys
 def assign_mesh_properties(mesh):
     mesh.permeability[:] = np.array(
         [1.0, 0.5, 0.0, 0.5, 1.0, 0.5, 0.0, 0.5, 1.0])
-
-    C = mesh.volumes.center[:]
 
     dirichlet_faces = mesh.faces.boundary[:]
     mesh.dirichlet_faces[dirichlet_faces] = 1
