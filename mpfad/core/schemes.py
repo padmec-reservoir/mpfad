@@ -23,9 +23,23 @@ class MpfadScheme(object):
         self.Kn_L = None
         self.Kn_R = None
 
+        # Transmissibility matrix and RHS.
+        self.A = None
+        self.q = None
+
+        # Transmissibility terms split into TPFA and cross-diffusion terms.
+        self.A_tpfa = None
+        self.A_cdt = None
+
+        # RHS terms split into TPFA and cross-diffusion terms.
+        self.q_tpfa = None
+        self.q_cdt = None
+
+        # Divergent operator used to assemble the face transmissibility terms.
+        self.D = None
+
     def assemble(self):
-        """Assemble the transmissibility of the MPFA-D scheme. After the call, the
-        attributes `A` and `q` are set and can be used to solve the problem.
+        """Assemble the transmissibility of the MPFA-D scheme.
 
         Parameters
         ----------
@@ -41,16 +55,20 @@ class MpfadScheme(object):
         self._set_normal_permeabilities()
 
         A_tpfa = self._assemble_tpfa_matrix()
-        A_cdt, q_cdt = self._assemble_cdt_matrix()
+        D, A_cdt, q_cdt = self._assemble_cdt_matrix()
 
         A_D, q_D = self._handle_dirichlet_bc()
         q_N = self._handle_neumann_bc()
         q_source = self.mesh.source_term[:].flatten()
 
-        A = A_tpfa + A_cdt + A_D
-        q = q_D + q_N - q_cdt + q_source
+        self.A = A_tpfa + A_cdt + A_D
+        self.A_tpfa = (A_tpfa + A_D).copy()
+        self.A_cdt = A_cdt.copy()
+        self.D = D.copy()
 
-        return A, q
+        self.q_tpfa = q_D + q_N + q_source
+        self.q_cdt = q_cdt[:]
+        self.q = self.q_tpfa - self.q_cdt
 
     def _set_internal_vols_pairs(self):
         """Set the pairs of volumes sharing an internal face in the 
@@ -330,7 +348,7 @@ class MpfadScheme(object):
         in_faces_idx = np.hstack((np.arange(n_in_faces), np.arange(n_in_faces)))
         in_vols_flat = self.in_vols_pairs.flatten(order="F")
 
-        M = csr_matrix(
+        D = csr_matrix(
             (d, (in_vols_flat, in_faces_idx)),
             shape=(n_vols, n_in_faces))
 
@@ -346,11 +364,11 @@ class MpfadScheme(object):
         qN_cdt = self._compute_boundary_contribution(
             neumann_nodes, neu_ws, I, J, K, D_JK, D_JI, Keq_N)
 
-        A_cdt = M @ cdt
+        A_cdt = D @ cdt
 
         q_cdt = qD_cdt + qN_cdt
 
-        return A_cdt, q_cdt
+        return D, A_cdt, q_cdt
 
     def _compute_boundary_contribution(
             self, bnodes, bvalues, I, J, K, D_JK, D_JI, Keq_N):
