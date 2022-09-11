@@ -7,7 +7,5 @@ class BaseNonLinearCorrection(object):
         self.mpfad = mpfad_scheme
 
     def run(self, assemble_mpfad_matrix=True):
-        raise NotImplementedError()
-
-    def apply_non_linear_correction(self):
-        raise NotImplementedError()
+        if assemble_mpfad_matrix:
+            self.mpfad.assemble()
