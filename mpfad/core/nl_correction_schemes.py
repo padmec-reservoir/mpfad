@@ -72,6 +72,45 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
 
         return Y
 
+    def _compute_correction_params(self, Y, ut, ut_max, ut_min):
+        # Correction coef. intervals for each face.
+        F = np.zeros((self.mpfad.in_vols_pairs.shape[0], 2))
+
+        L_idx = self.mpfad.in_vols_pairs[:, 0]
+        R_idx = self.mpfad.in_vols_pairs[:, 1]
+
+        Y_L = Y[L_idx]
+        Y_R = Y[R_idx]
+
+        F[:, 0] = np.maximum(Y_R[:, 0], Y_L[:, 0])
+        F[:, 1] = np.minimum(Y_R[:, 1], Y_L[:, 1])
+
+        # Check if the correction interval for a face is empty.
+        empty_F_mask = F[:, 0] >= F[:, 1]
+
+        # Check which volume sharing the face violates the DMP at the
+        # current iteration.
+        R_dmp_viol_mask = (ut[R_idx] < (
+            ut_min[R_idx] - self.dmp_tol)) | (ut[R_idx] > (ut_max[R_idx] + self.dmp_tol))
+        L_dmp_viol_mask = (ut[L_idx] < (
+            ut_min[L_idx] - self.dmp_tol)) | (ut[L_idx] > (ut_max[L_idx] + self.dmp_tol))
+
+        F[empty_F_mask & L_dmp_viol_mask] = Y_L[empty_F_mask & L_dmp_viol_mask]
+        F[empty_F_mask & R_dmp_viol_mask] = Y_R[empty_F_mask & R_dmp_viol_mask]
+
+        else_mask = empty_F_mask & R_dmp_viol_mask & L_dmp_viol_mask
+        F[else_mask, 0] = 0.5 * (Y_L[else_mask, 0] + Y_R[else_mask, 0])
+        F[else_mask, 1] = 0.5 * (Y_L[else_mask, 1] + Y_R[else_mask, 1])
+
+        # Find the correction parameters.
+        alpha = np.zeros(len(self.mesh.faces))
+
+        max_F_mask = F[:, 1] < 1
+        alpha[max_F_mask] = F[max_F_mask, 1]
+        alpha[~max_F_mask] = 0.5 * np.sum(F[~max_F_mask], axis=1)
+
+        return alpha
+
     def _compute_ldu_decomposition(self, M):
         lu_decomp = splu(M)
         diag_U = lu_decomp.U.diagonal()
