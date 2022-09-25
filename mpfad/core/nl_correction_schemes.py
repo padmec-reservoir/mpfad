@@ -22,6 +22,22 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
     def run(self, assemble_mpfad_matrix=True):
         super().run(assemble_mpfad_matrix)
 
+    def _compute_max_min_solutions_in_stencil(self, ut):
+        all_vols = self.mesh.volumes.all[:]
+        vols_neighbors_flat = np.concatenate(self.vols_neighbors_by_node)
+
+        ns = np.array([neigh.shape[0] for neigh in self.vols_neighbors_by_node])
+        vols_neighbors_idx = np.repeat(all_vols, ns)
+
+        Ut_mat = csc_matrix(
+            (ut[vols_neighbors_flat],
+             (vols_neighbors_idx, vols_neighbors_flat)))
+
+        ut_max = Ut_mat.max(axis=1).toarray().flatten()
+        ut_min = Ut_mat.min(axis=1).toarray().flatten()
+
+        return ut_max, ut_min
+
     def _find_correction_params_intervals(
             self, ut, ut_max, ut_min, q_tpfa, q_cdt, L_tpfa, D_tpfa, U_tpfa,
             L_cdt, D_cdt, U_cdt):
