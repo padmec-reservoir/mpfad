@@ -135,6 +135,12 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
 
         return alpha
 
+    def _update_cdt(self, alpha, At_cdt, bt_cdt, Tt_cdt, Ft_cdt):
+        diag_alpha = diags(alpha - 1)
+        At_next_cdt = At_cdt + diag_alpha @ self.mpfad.D @ Tt_cdt
+        bt_next_cdt = bt_cdt + diag_alpha @ self.mpfad.D @ Ft_cdt
+        return At_next_cdt, bt_next_cdt
+
     def _compute_ldu_decomposition(self, M):
         lu_decomp = splu(M)
         diag_U = lu_decomp.U.diagonal()
