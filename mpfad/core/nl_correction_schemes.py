@@ -18,6 +18,9 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
     def __init__(self, mesh, mpfad_scheme: MpfadScheme, dmp_tol=1e-6):
         super().__init__(mesh, mpfad_scheme)
         self.dmp_tol = dmp_tol
+        self.L_tpfa = None
+        self.D_tpfa = None
+        self.U_tpfa = None
 
     def run(self, assemble_mpfad_matrix=True):
         super().run(assemble_mpfad_matrix)
@@ -39,12 +42,13 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
         return ut_max, ut_min
 
     def _find_correction_params_intervals(
-            self, ut, ut_max, ut_min, q_tpfa, q_cdt, L_tpfa, D_tpfa, U_tpfa,
-            L_cdt, D_cdt, U_cdt):
+            self, ut, ut_max, ut_min, q_tpfa, q_cdt, L_cdt, D_cdt, U_cdt):
         x_max = (U_cdt @ ut) + (D_cdt @ ut_max) + (L_cdt @ ut_max) - q_cdt
-        y_max = (U_tpfa @ ut) + (D_tpfa @ ut_max) + (L_tpfa @ ut_max) - q_tpfa
+        y_max = (self.U_tpfa @ ut) + (self.D_tpfa @
+                                      ut_max) + (self.L_tpfa @ ut_max) - q_tpfa
         x_min = (U_cdt @ ut) + (D_cdt @ ut_min) + (L_cdt @ ut_min) - q_cdt
-        y_min = (U_tpfa @ ut) + (D_tpfa @ ut_min) + (L_tpfa @ ut_min) - q_tpfa
+        y_min = (self.U_tpfa @ ut) + (self.D_tpfa @
+                                      ut_min) + (self.L_tpfa @ ut_min) - q_tpfa
 
         Y_max = np.zeros((len(self.mesh.volumes), 2))
         Y_min = np.zeros((len(self.mesh.volumes), 2))
