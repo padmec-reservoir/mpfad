@@ -18,6 +18,10 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
     def __init__(self, mesh, mpfad_scheme: MpfadScheme, dmp_tol=1e-6):
         super().__init__(mesh, mpfad_scheme)
         self.dmp_tol = dmp_tol
+        all_vols = self.mesh.volumes.all[:]
+        self.vols_neighbors_by_node = self.mesh.volumes.bridge_adjacencies(
+            all_vols,
+            0, 3)
         self.L_tpfa = None
         self.D_tpfa = None
         self.U_tpfa = None
