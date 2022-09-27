@@ -1,6 +1,6 @@
 from mpfad.core.schemes import MpfadScheme
-from scipy.sparse.linalg import splu, spsolve
-from scipy.sparse import diags, csc_matrix
+from scipy.sparse.linalg import spsolve
+from scipy.sparse import diags, tril, triu, csc_matrix
 import numpy as np
 
 
@@ -142,12 +142,9 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
         return At_next_cdt, bt_next_cdt
 
     def _compute_ldu_decomposition(self, M):
-        lu_decomp = splu(M)
-        diag_U = lu_decomp.U.diagonal()
-        L = lu_decomp.L
-        D = diags(diag_U)
-        U = lu_decomp.U / diag_U[:, None]
-
+        L = tril(M, k=-1, format="csc")
+        D = diags(M.diagonal())
+        U = triu(M, k=1, format="csc")
         return L, D, U
 
     def _compute_l2_error(self, u1, u2):
