@@ -29,6 +29,20 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
     def run(self, assemble_mpfad_matrix=True):
         super().run(assemble_mpfad_matrix)
 
+    def _initialize(self):
+        u0 = spsolve(self.mpfad.A, self.mpfad.q)
+        u0_max, u0_min = self._compute_max_min_solutions_in_stencil(u0)
+
+        L, D, U = self._compute_ldu_decomposition(self.mpfad.A)
+        u1 = spsolve(D + L, self.mpfad.q - U @ u0)
+
+        r1 = self._compute_l2_error(u0, u1)
+
+        self.L_tpfa, self.D_tpfa, self.U_tpfa = self._compute_ldu_decomposition(
+            self.mpfad.A_tpfa)
+
+        return u0, u1, u0_max, u0_min, r1, L, D, U
+
     def _compute_max_min_solutions_in_stencil(self, ut):
         all_vols = self.mesh.volumes.all[:]
         vols_neighbors_flat = np.concatenate(self.vols_neighbors_by_node)
