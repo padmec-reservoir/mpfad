@@ -22,6 +22,14 @@ class MpfadNonLinearDefectionCorrection(BaseNonLinearCorrection):
         self.vols_neighbors_by_node = self.mesh.volumes.bridge_adjacencies(
             all_vols,
             0, 3)
+
+        bfaces = self.mesh.faces.boundary[:]
+        bfaces_neumann_values = self.mesh.neumann[bfaces].flatten()
+        neumann_faces = bfaces[bfaces_neumann_values != 0]
+        neu_vols = self.mesh.faces.bridge_adjacencies(
+            neumann_faces, 2, 3).flatten()
+        self.neu_vols_mask = np.isin(all_vols, neu_vols)
+
         self.L_tpfa = None
         self.D_tpfa = None
         self.U_tpfa = None
