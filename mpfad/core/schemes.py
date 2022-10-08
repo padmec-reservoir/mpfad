@@ -31,9 +31,15 @@ class MpfadScheme(object):
         self.A_tpfa = None
         self.A_cdt = None
 
+        # Cross-diffusion terms in face transmissibility.
+        self.T_cdt = None
+
         # RHS terms split into TPFA and cross-diffusion terms.
         self.q_tpfa = None
         self.q_cdt = None
+
+        # RHS cross-diffusion terms by face.
+        self.F_cdt = None
 
         # Divergent operator used to assemble the face transmissibility terms.
         self.D = None
@@ -55,7 +61,7 @@ class MpfadScheme(object):
         self._set_normal_permeabilities()
 
         A_tpfa = self._assemble_tpfa_matrix()
-        D, A_cdt, q_cdt = self._assemble_cdt_matrix()
+        D, A_cdt, q_cdt, T_cdt, F_cdt = self._assemble_cdt_matrix()
 
         A_D, q_D = self._handle_dirichlet_bc()
         q_N = self._handle_neumann_bc()
@@ -65,6 +71,8 @@ class MpfadScheme(object):
         self.A_tpfa = (A_tpfa + A_D).copy()
         self.A_cdt = A_cdt.copy()
         self.D = D.copy()
+        self.T_cdt = T_cdt.copy()
+        self.F_cdt = F_cdt.copy()
 
         self.q_tpfa = q_D + q_N + q_source
         self.q_cdt = q_cdt[:]
@@ -338,7 +346,7 @@ class MpfadScheme(object):
         cdt_J = 0.5 * W[J, :].multiply(((D_JI - D_JK) * Keq_N)
                                        [:, np.newaxis]).tocsr()
         cdt_K = 0.5 * W[K, :].multiply((-D_JI * Keq_N)[:, np.newaxis]).tocsr()
-        cdt = cdt_I + cdt_J + cdt_K
+        T_cdt = cdt_I + cdt_J + cdt_K
 
         n_vols = len(self.mesh.volumes)
         n_in_faces = len(in_faces)
@@ -359,16 +367,17 @@ class MpfadScheme(object):
         neumann_nodes_flag = self.mesh.neumann_nodes_flag[:].flatten()
         neumann_nodes = self.mesh.nodes.all[neumann_nodes_flag == 1]
 
-        qD_cdt = self._compute_boundary_contribution(
+        qD_cdt, F_D_cdt = self._compute_boundary_contribution(
             dirichlet_nodes, gD, I, J, K, D_JK, D_JI, Keq_N)
-        qN_cdt = self._compute_boundary_contribution(
+        qN_cdt, F_N_cdt = self._compute_boundary_contribution(
             neumann_nodes, neu_ws, I, J, K, D_JK, D_JI, Keq_N)
 
-        A_cdt = D @ cdt
+        A_cdt = D @ T_cdt
 
         q_cdt = qD_cdt + qN_cdt
+        F_cdt = F_D_cdt + F_N_cdt
 
-        return D, A_cdt, q_cdt
+        return D, A_cdt, q_cdt, T_cdt, F_cdt
 
     def _compute_boundary_contribution(
             self, bnodes, bvalues, I, J, K, D_JK, D_JI, Keq_N):
@@ -415,6 +424,7 @@ class MpfadScheme(object):
         K_D_term = -0.5 * Keq_N[K_D_mask] * D_JI[K_D_mask] * bvalues[K_D]
 
         q_cdt = np.zeros(len(self.mesh.volumes))
+        F_cdt = I_D_term + J_D_term + K_D_term
 
         np.add.at(q_cdt, I_D_left_vol, I_D_term)
         np.add.at(q_cdt, I_D_right_vol, -I_D_term)
@@ -427,7 +437,7 @@ class MpfadScheme(object):
 
         q_cdt *= -1
 
-        return q_cdt
+        return q_cdt, F_cdt
 
     def _handle_dirichlet_bc(self):
         """Computes the contribution of the dirichlet boundary
