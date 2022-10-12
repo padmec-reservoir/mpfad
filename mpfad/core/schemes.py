@@ -424,7 +424,11 @@ class MpfadScheme(object):
         K_D_term = -0.5 * Keq_N[K_D_mask] * D_JI[K_D_mask] * bvalues[K_D]
 
         q_cdt = np.zeros(len(self.mesh.volumes))
-        F_cdt = I_D_term + J_D_term + K_D_term
+
+        F_cdt = np.zeros(len(self.mesh.faces.internal))
+        F_cdt[I_D_mask] += I_D_term
+        F_cdt[J_D_mask] += J_D_term
+        F_cdt[K_D_mask] += K_D_term
 
         np.add.at(q_cdt, I_D_left_vol, I_D_term)
         np.add.at(q_cdt, I_D_right_vol, -I_D_term)
