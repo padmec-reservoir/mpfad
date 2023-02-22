@@ -9,10 +9,12 @@ class GlsInterpolation(BaseInterpolation):
         self.A = self._compute_diffusion_magnitude()
         self.in_vols_pairs = None
         self.Ns = None
+        self.in_faces_map = None
 
     def interpolate(self):
         self._set_internal_vols_pairs()
         self._set_normal_vectors()
+        self._set_in_faces_map()
 
         all_nodes = self.mesh.nodes.all[:]
         dirichlet_nodes_flag = self.mesh.dirichlet_nodes_flag[:].flatten()
@@ -165,9 +167,8 @@ class GlsInterpolation(BaseInterpolation):
 
         Ni[KSetV_range, KSetV_range] = 1.0
 
-        Sv_in_idx = np.isin(
-            self.mesh.faces.internal[:],
-            Sv, assume_unique=True).nonzero()[0]
+        Sv_in_idx = self.in_faces_map[Sv]
+        Sv_in_idx = Sv_in_idx[Sv_in_idx != -1]
         Ks_Sv = self.in_vols_pairs[Sv_in_idx, :]
         sorter = np.argsort(KSetv)
         Ij1 = sorter[np.searchsorted(KSetv, Ks_Sv[:, 0], sorter=sorter)]
@@ -229,6 +230,12 @@ class GlsInterpolation(BaseInterpolation):
         internal_faces = self.mesh.faces.internal[:]
         self.in_vols_pairs = self.mesh.faces.bridge_adjacencies(
             internal_faces, 2, 3)
+    
+    def _set_in_faces_map(self):
+        internal_faces = self.mesh.faces.internal[:]
+        self.in_faces_map = np.zeros(len(self.mesh.faces), dtype=int)
+        self.in_faces_map[:] = -1
+        self.in_faces_map[internal_faces] = np.arange(internal_faces.shape[0])
 
     def _set_normal_vectors(self):
         """Compute and store the normal vectors and their norms.
