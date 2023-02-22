@@ -65,18 +65,11 @@ class GlsInterpolation(BaseInterpolation):
     def _interpolate_internal_nodes(self, in_nodes):
         vols_around_in_nodes = self.mesh.nodes.bridge_adjacencies(
             in_nodes, 1, 3)
-
-        in_faces = self.mesh.faces.internal[:]
         faces_around_in_nodes = self.mesh.nodes.bridge_adjacencies(
             in_nodes, 1, 2)
-        in_faces_around_in_nodes = [
-            np.intersect1d(f, in_faces, assume_unique=True)
-            for f in faces_around_in_nodes]
-
         ws = []
 
-        for v, KSetv, Sv in zip(
-                in_nodes, vols_around_in_nodes, in_faces_around_in_nodes):
+        for v, KSetv, Sv in zip(in_nodes, vols_around_in_nodes, faces_around_in_nodes):
             nK = len(KSetv)
             nS = len(Sv)
 
