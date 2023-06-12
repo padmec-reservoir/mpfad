@@ -195,8 +195,10 @@ class MpfadScheme(object):
         Kt_ij_L_pre = np.einsum("ij,ikj->ik", self.Ns, KL)
         Kt_ij_R_pre = np.einsum("ij,ikj->ik", self.Ns, KR)
 
-        Kt_ij_L = np.einsum("ij,ij->i", Kt_ij_L_pre, tau_ij) / self.Ns_norm ** 2
-        Kt_ij_R = np.einsum("ij,ij->i", Kt_ij_R_pre, tau_ij) / self.Ns_norm ** 2
+        Kt_ij_L = np.einsum("ij,ij->i", Kt_ij_L_pre,
+                            tau_ij) / self.Ns_norm ** 2
+        Kt_ij_R = np.einsum("ij,ij->i", Kt_ij_R_pre,
+                            tau_ij) / self.Ns_norm ** 2
 
         return Kt_ij_L, Kt_ij_R
 
@@ -327,7 +329,8 @@ class MpfadScheme(object):
 
         d = - np.ones(n_in_faces * 2)
         d[n_in_faces:] *= -1
-        in_faces_idx = np.hstack((np.arange(n_in_faces), np.arange(n_in_faces)))
+        in_faces_idx = np.hstack(
+            (np.arange(n_in_faces), np.arange(n_in_faces)))
         in_vols_flat = self.in_vols_pairs.flatten(order="F")
 
         M = csr_matrix(
@@ -484,7 +487,8 @@ class MpfadScheme(object):
 
         nvols = len(self.mesh.volumes)
         diag_idx = np.arange(nvols)
-        A_D = csr_matrix((diag_A_D, (diag_idx, diag_idx)), shape=(nvols, nvols))
+        A_D = csr_matrix((diag_A_D, (diag_idx, diag_idx)),
+                         shape=(nvols, nvols))
 
         q_D = np.zeros(len(self.mesh.volumes))
         np.add.at(
