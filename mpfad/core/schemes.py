@@ -522,3 +522,278 @@ class MpfadScheme(object):
             np.add.at(q_N, neumann_volumes, neumann_values)
 
         return q_N
+
+
+class TpfaScheme(object):
+    def __init__(self, mesh):
+        self.mesh = mesh
+
+        # Pairs of volumes sharing an internal face.
+        self.in_vols_pairs = None
+
+        # Distances from the internal faces to the volumes who share it.
+        self.h_L = None
+        self.h_R = None
+
+        # Normal vectors to internal faces.
+        self.Ns = None
+        self.Ns_norm = None
+
+        # Normal projections of the permeability tensor.
+        self.Kn_L = None
+        self.Kn_R = None
+
+    def assemble(self):
+        """Assemble the transmissibility of the TPFA scheme. After the call, the
+        attributes `A` and `q` are set and can be used to solve the problem.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        self._set_internal_vols_pairs()
+        self._set_normal_vectors()
+        self._set_normal_distances()
+        self._set_normal_permeabilities()
+
+        # Compute the face transmissibilities.
+        Kn_prod = self.Kn_L * self.Kn_R
+        Keq = Kn_prod / ((self.Kn_L * self.h_R) +
+                         (self.Kn_R * self.h_L))
+        faces_trans = Keq * self.Ns_norm
+
+        # Set transmissibilities in matrix.
+        n_vols = len(self.mesh.volumes)
+
+        data = np.hstack((-faces_trans, -faces_trans))
+        row_idx = np.hstack(
+            (self.in_vols_pairs[:, 0],
+             self.in_vols_pairs[:, 1]))
+        col_idx = np.hstack(
+            (self.in_vols_pairs[:, 1],
+             self.in_vols_pairs[:, 0]))
+
+        A_in = csr_matrix((data, (row_idx, col_idx)), shape=(n_vols, n_vols))
+        A_in.setdiag(-A_in.sum(axis=1))
+
+        A_D, q_D = self._handle_dirichlet_bc()
+        q_N = self._handle_neumann_bc()
+
+        A = A_in + A_D
+        q = q_D + q_N
+
+        return A, q
+
+    def _set_internal_vols_pairs(self):
+        """Set the pairs of volumes sharing an internal face in the 
+        attribute `in_vols_pairs`.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        internal_faces = self.mesh.faces.internal[:]
+        self.in_vols_pairs = self.mesh.faces.bridge_adjacencies(
+            internal_faces, 2, 3)
+
+    def _set_normal_distances(self):
+        """Compute the distances from the center of the internal faces to their
+        adjacent volumes.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        internal_faces = self.mesh.faces.internal[:]
+
+        L = self.mesh.volumes.center[self.in_vols_pairs[:, 0]]
+        R = self.mesh.volumes.center[self.in_vols_pairs[:, 1]]
+
+        in_faces_nodes = self.mesh.faces.bridge_adjacencies(
+            internal_faces, 0, 0)
+        J_idx = in_faces_nodes[:, 1]
+        J = self.mesh.nodes.coords[J_idx]
+
+        LJ = J - L
+        LR = J - R
+
+        self.h_L = np.abs(np.einsum("ij,ij->i", self.Ns, LJ) / self.Ns_norm)
+        self.h_R = np.abs(np.einsum("ij,ij->i", self.Ns, LR) / self.Ns_norm)
+
+    def _set_normal_vectors(self):
+        """Set the attribute `Ns` which stores the normal vectors 
+        to the internal faces.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        # Retrieve the internal faces.
+        internal_faces = self.mesh.faces.internal[:]
+
+        # Retrieve the points that form the components of the normal vectors.
+        internal_faces_nodes = self.mesh.faces.bridge_adjacencies(
+            internal_faces,
+            0, 0)
+        I_idx = internal_faces_nodes[:, 0]
+        J_idx = internal_faces_nodes[:, 1]
+        K_idx = internal_faces_nodes[:, 2]
+
+        I = self.mesh.nodes.coords[I_idx]
+        J = self.mesh.nodes.coords[J_idx]
+        K = self.mesh.nodes.coords[K_idx]
+
+        n_vols_pairs = len(internal_faces)
+        internal_volumes_centers_flat = self.mesh.volumes.center[self.in_vols_pairs.flatten(
+        )]
+        internal_volumes_centers = internal_volumes_centers_flat.reshape((
+            n_vols_pairs,
+            2, 3))
+
+        LJ = J - internal_volumes_centers[:, 0]
+
+        # Set the normal vectors.
+        self.Ns = 0.5 * np.cross(I - J, K - J)
+        self.Ns_norm = np.linalg.norm(self.Ns, axis=1)
+
+        N_sign = np.sign(np.einsum("ij,ij->i", LJ, self.Ns))
+        (self.in_vols_pairs[N_sign < 0, 0],
+         self.in_vols_pairs[N_sign < 0, 1]) = (self.in_vols_pairs[N_sign < 0, 1],
+                                               self.in_vols_pairs[N_sign < 0, 0])
+
+    def _set_normal_permeabilities(self):
+        """Compute the normal projections of the permeability tensors.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        None
+        """
+        n_vols_pairs = len(self.mesh.faces.internal)
+
+        lvols = self.in_vols_pairs[:, 0]
+        rvols = self.in_vols_pairs[:, 1]
+
+        KL = self.mesh.permeability[lvols].reshape((n_vols_pairs, 3, 3))
+        KR = self.mesh.permeability[rvols].reshape((n_vols_pairs, 3, 3))
+
+        KnL_pre = np.einsum("ij,ikj->ik", self.Ns, KL)
+        KnR_pre = np.einsum("ij,ikj->ik", self.Ns, KR)
+
+        KnL = np.einsum("ij,ij->i", KnL_pre, self.Ns) / self.Ns_norm ** 2
+        KnR = np.einsum("ij,ij->i", KnR_pre, self.Ns) / self.Ns_norm ** 2
+
+        self.Kn_L = KnL[:]
+        self.Kn_R = KnR[:]
+    
+    def _handle_dirichlet_bc(self):
+        """Computes the contribution of the dirichlet boundary
+        conditions through the boundary faces.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        A tuple `(A_D, q_D)` where `A_D` is a Scipy csr_matrix with the
+        contribution of the Dirichlet boundary conditions to the system's
+        matrix and `q_D` is a numpy array containing the contribution to
+        the RHS of the system.
+        """
+        bfaces = self.mesh.faces.boundary[:]
+        bfaces_dirichlet_values = self.mesh.dirichlet_faces[bfaces].flatten()
+        dirichlet_faces = bfaces[bfaces_dirichlet_values == 1]
+
+        dirichlet_nodes = self.mesh.faces.bridge_adjacencies(
+            dirichlet_faces, 0, 0)
+        dirichlet_volumes = self.mesh.faces.bridge_adjacencies(
+            dirichlet_faces, 2, 3).flatten()
+
+        L = self.mesh.volumes.center[dirichlet_volumes]
+        I_idx, J_idx, K_idx = (
+            dirichlet_nodes[:, 0],
+            dirichlet_nodes[:, 1],
+            dirichlet_nodes[:, 2])
+        I, J, K = (
+            self.mesh.nodes.coords[I_idx],
+            self.mesh.nodes.coords[J_idx],
+            self.mesh.nodes.coords[K_idx])
+
+        N = 0.5 * np.cross(I - J, K - J)
+
+        LJ = J - L
+        N_test = np.sign(np.einsum("ij,ij->i", LJ, N))
+        I[N_test < 0], K[N_test < 0] = K[N_test < 0], I[N_test < 0]
+        N = 0.5 * np.cross(I - J, K - J)
+
+        N_norm = np.linalg.norm(N, axis=1)
+        h_L = np.abs(np.einsum("ij,ij->i", N, LJ) / N_norm)
+
+        K_all = self.mesh.permeability[dirichlet_volumes].reshape(
+            (len(dirichlet_volumes), 3, 3))
+        Kn_L_partial = np.einsum("ij,ikj->ik", N, K_all)
+        Kn_L = np.einsum("ij,ij->i", Kn_L_partial, N) / (N_norm ** 2)
+
+        gD = self.mesh.dirichlet_nodes[dirichlet_nodes.flatten()].reshape(
+            dirichlet_nodes.shape)
+        gD_I, gD_J, gD_K = gD[:, 0], gD[:, 1], gD[:, 2]
+        gD_I[N_test < 0], gD_K[N_test < 0] = gD_K[N_test < 0], gD_I[N_test < 0]
+
+        diag_A_D = np.zeros(len(self.mesh.volumes))
+        np.add.at(diag_A_D, dirichlet_volumes, ((Kn_L * N_norm) / h_L))
+
+        nvols = len(self.mesh.volumes)
+        diag_idx = np.arange(nvols)
+        A_D = csr_matrix((diag_A_D, (diag_idx, diag_idx)),
+                         shape=(nvols, nvols))
+
+        q_D = np.zeros(len(self.mesh.volumes))
+        np.add.at(q_D, dirichlet_volumes, (Kn_L * N_norm / h_L) * gD_J)
+
+        return A_D, q_D
+
+    def _handle_neumann_bc(self):
+        """Computes the contribution of the Neumann boundary
+        conditions through the boundary faces.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        A numpy array containing the contribution to the RHS of the system.
+        """
+        bfaces = self.mesh.faces.boundary[:]
+        bfaces_neumann_values = self.mesh.neumann[bfaces].flatten()
+        neumann_faces = bfaces[bfaces_neumann_values != 0]
+        neumann_values = bfaces_neumann_values[bfaces_neumann_values != 0]
+
+        q_N = np.zeros(len(self.mesh.volumes))
+
+        if len(neumann_faces) > 0:
+            neumann_volumes = self.mesh.faces.bridge_adjacencies(
+                neumann_faces, 2, 3).flatten()
+            np.add.at(q_N, neumann_volumes, neumann_values)
+
+        return q_N
