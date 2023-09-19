@@ -582,9 +582,10 @@ class TpfaScheme(object):
 
         A_D, q_D = self._handle_dirichlet_bc()
         q_N = self._handle_neumann_bc()
+        q_source = self.mesh.source_term[:].flatten()
 
         A = A_in + A_D
-        q = q_D + q_N
+        q = q_D + q_N + q_source
 
         return A, q
 
